@@ -116,8 +116,8 @@ export default function ImportPage() {
       setRecentImports(
         snap.docs.map((d) => ({ id: d.id, ...d.data() } as ReportDoc))
       );
-    } catch {
-      // Firestore may have no data yet
+    } catch (err) {
+      console.error("fetchRecentImports error:", err);
     } finally {
       setLoadingImports(false);
     }

@@ -324,8 +324,9 @@ export default function OutletSalesPage() {
         setReports(
           snap.docs.map((d) => ({ id: d.id, ...d.data() } as ReportMeta))
         );
-      } catch {
-        // no reports yet
+      } catch (err) {
+        console.error("fetchReports error:", err);
+        setLoadingReports(false);
       } finally {
         setLoadingReports(false);
       }
