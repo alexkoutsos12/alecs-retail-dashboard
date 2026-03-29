@@ -867,7 +867,7 @@ export default function PerkPayoutPage() {
                   <div
                     key={group.name}
                     className="mb-10"
-                    style={{ breakInside: "avoid" }}
+                    style={{ breakAfter: "page" }}
                   >
                     <h3 className="font-heading font-bold text-base mb-0.5">
                       {group.name}
