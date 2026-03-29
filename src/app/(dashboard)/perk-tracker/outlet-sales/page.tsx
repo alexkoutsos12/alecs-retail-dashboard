@@ -202,7 +202,7 @@ export default function OutletSalesPage() {
         name: string;
         txns: Transaction[];
         outletCount: number;
-        totalMarkdown: number;
+        totalSales: number;
       }
     >();
 
@@ -212,20 +212,19 @@ export default function OutletSalesPage() {
           name: t.salesperson,
           txns: [],
           outletCount: 0,
-          totalMarkdown: 0,
+          totalSales: 0,
         });
       }
       const g = map.get(t.salesperson)!;
       g.txns.push(t);
       if (t.isOutlet) g.outletCount++;
-      g.totalMarkdown += t.markdown;
+      g.totalSales += t.salePrice;
     }
 
     return [...map.values()]
       .map((g) => ({
         ...g,
         ticketCount: new Set(g.txns.map((t) => t.ticketNumber)).size,
-        avgMarkdown: g.txns.length > 0 ? g.totalMarkdown / g.txns.length : 0,
         txns: [...g.txns].sort((a, b) =>
           a.date !== b.date
             ? b.date.localeCompare(a.date)
@@ -235,8 +234,8 @@ export default function OutletSalesPage() {
       .sort((a, b) => b.outletCount - a.outletCount);
   }, [filteredTransactions]);
 
-  const totalMarkdownSum = filteredTransactions.reduce(
-    (s, t) => s + t.markdown,
+  const totalSalesSum = filteredTransactions.reduce(
+    (s, t) => s + t.salePrice,
     0
   );
 
@@ -644,8 +643,8 @@ export default function OutletSalesPage() {
               value={groupedData.length.toLocaleString()}
             />
             <StatCard
-              label="Total Markdown"
-              value={fmtMoney(totalMarkdownSum)}
+              label="Total Sales"
+              value={fmtMoney(totalSalesSum)}
             />
             <StatCard
               label="Date Range"
@@ -693,10 +692,7 @@ export default function OutletSalesPage() {
                           : "Perk Items"}
                       </th>
                       <th className="px-3 py-2 font-normal">Tickets</th>
-                      <th className="px-3 py-2 font-normal">Total Markdown</th>
-                      <th className="px-3 py-2 font-normal">
-                        Avg Markdown/Item
-                      </th>
+                      <th className="px-3 py-2 font-normal">Total Sales</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -726,10 +722,7 @@ export default function OutletSalesPage() {
                             <td className="px-3 py-3">{displayCount}</td>
                             <td className="px-3 py-3">{group.ticketCount}</td>
                             <td className="px-3 py-3">
-                              {fmtMoney(group.totalMarkdown)}
-                            </td>
-                            <td className="px-3 py-3">
-                              {fmtMoney(group.avgMarkdown)}
+                              {fmtMoney(group.totalSales)}
                             </td>
                           </tr>
                           {isExpanded && (
@@ -737,7 +730,7 @@ export default function OutletSalesPage() {
                               key={`${group.name}-expanded`}
                               className="border-b border-brand-cream"
                             >
-                              <td colSpan={6} className="p-0">
+                              <td colSpan={5} className="p-0">
                                 <div className="overflow-x-auto">
                                   <table className="w-full text-xs font-body min-w-[800px]">
                                     <thead>
@@ -852,7 +845,7 @@ export default function OutletSalesPage() {
                     </h3>
                     <p className="text-xs text-gray-500 mb-2">
                       {group.outletCount} outlet items · {group.ticketCount}{" "}
-                      tickets · {fmtMoney(group.totalMarkdown)} markdown
+                      tickets · {fmtMoney(group.totalSales)} sales
                     </p>
                     <table className="w-full text-xs border-collapse">
                       <thead>
