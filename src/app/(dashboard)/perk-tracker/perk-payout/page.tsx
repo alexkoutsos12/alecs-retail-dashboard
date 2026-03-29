@@ -148,6 +148,10 @@ export default function PerkPayoutPage() {
   const cacheRef = useRef<Map<string, Transaction[]>>(new Map());
   const autoLoadedRef = useRef(false);
 
+  useEffect(() => {
+    document.title = "Perk Payout · Perk Tracker";
+  }, []);
+
   // Applied filters
   const [filterStart, setFilterStart] = useState("");
   const [filterEnd, setFilterEnd] = useState("");

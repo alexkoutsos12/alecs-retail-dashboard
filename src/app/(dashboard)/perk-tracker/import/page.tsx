@@ -24,6 +24,7 @@ import {
   deleteDoc,
   serverTimestamp,
 } from "firebase/firestore";
+import toast from "react-hot-toast";
 import {
   ref as storageRef,
   uploadBytes,
@@ -152,6 +153,10 @@ export default function ImportPage() {
     const file = e.target.files?.[0];
     if (file) handleFile(file);
   };
+
+  useEffect(() => {
+    document.title = "Import · Perk Tracker";
+  }, []);
 
   const reset = () => {
     setImportState("idle");
@@ -282,12 +287,14 @@ export default function ImportPage() {
             breakdown: { regularSales, returns, specialOrders },
           });
           setImportState("success");
+          toast.success("Report imported successfully.");
           fetchRecentImports();
         } catch (err) {
-          setErrorMessage(
-            err instanceof Error ? err.message : "Upload failed. Please try again."
-          );
+          const msg =
+            err instanceof Error ? err.message : "Upload failed. Please try again.";
+          setErrorMessage(msg);
           setImportState("error");
+          toast.error(msg);
         }
       };
 
@@ -314,13 +321,18 @@ export default function ImportPage() {
 
   const handleDelete = async (report: ReportDoc) => {
     try {
-      await deleteObject(storageRef(storage, report.storagePath));
+      try {
+        await deleteObject(storageRef(storage, report.storagePath));
+      } catch {
+        // File may not exist
+      }
+      await deleteDoc(doc(db, "reports", report.id));
+      setDeleteDialog(null);
+      toast.success("Report deleted.");
+      fetchRecentImports();
     } catch {
-      // File may not exist
+      toast.error("Failed to delete report.");
     }
-    await deleteDoc(doc(db, "reports", report.id));
-    setDeleteDialog(null);
-    fetchRecentImports();
   };
 
   return (

@@ -139,6 +139,10 @@ export default function OutletSalesPage() {
   const cacheRef = useRef<Map<string, Transaction[]>>(new Map());
   const autoLoadedRef = useRef(false);
 
+  useEffect(() => {
+    document.title = "Outlet Sales · Perk Tracker";
+  }, []);
+
   // Applied filters
   const [filterStart, setFilterStart] = useState("");
   const [filterEnd, setFilterEnd] = useState("");

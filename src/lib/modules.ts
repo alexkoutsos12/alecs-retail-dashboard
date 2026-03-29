@@ -1,0 +1,47 @@
+// Module registry — the single source of truth for all modules.
+// Adding a new module: add one entry to this array.
+// The home page and sidebar update automatically.
+
+export interface NavItem {
+  label: string;
+  href: string;
+  icon: string; // Lucide icon name — must exist in sidebar's ICON_MAP
+}
+
+export interface AppModule {
+  id: string;
+  name: string;
+  description: string;
+  firestoreModule: string; // value stored in Firestore reports.module field
+  navItems: NavItem[];
+  importRoute: string;
+  reportRoutes: { label: string; href: string }[];
+}
+
+export const appModules: AppModule[] = [
+  {
+    id: "perk-tracker",
+    name: "Perk Tracker",
+    description:
+      "Outlet sales and employee perk payouts from the RICS Sales Journal.",
+    firestoreModule: "perk-tracker",
+    navItems: [
+      { label: "Import", href: "/perk-tracker/import", icon: "Upload" },
+      {
+        label: "Outlet Sales",
+        href: "/perk-tracker/outlet-sales",
+        icon: "ShoppingBag",
+      },
+      {
+        label: "Perk Payout",
+        href: "/perk-tracker/perk-payout",
+        icon: "Gift",
+      },
+    ],
+    importRoute: "/perk-tracker/import",
+    reportRoutes: [
+      { label: "Outlet Sales →", href: "/perk-tracker/outlet-sales" },
+      { label: "Perk Payout →", href: "/perk-tracker/perk-payout" },
+    ],
+  },
+];
