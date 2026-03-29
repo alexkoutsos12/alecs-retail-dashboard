@@ -138,8 +138,8 @@ export async function parseSalesJournal(
     const salespersonRaw = row[5] != null ? String(row[5]).trim() : "";
     const salesperson = salespersonRaw.replace(/^Sales:\s*/, "").trim();
 
-    const retailPrice = typeof row[13] === "number" ? row[13] : 0;
-    const salePrice = typeof row[14] === "number" ? row[14] : 0;
+    const retailPrice = typeof row[12] === "number" ? row[12] : 0;
+    const salePrice = typeof row[13] === "number" ? row[13] : 0;
     const perks = typeof row[15] === "number" ? row[15] : 0;
     const markdown = typeof row[16] === "number" ? row[16] : 0;
 

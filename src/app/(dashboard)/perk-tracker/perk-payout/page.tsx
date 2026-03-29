@@ -370,6 +370,7 @@ export default function PerkPayoutPage() {
       loadData(validIds, saved ?? undefined);
     } else {
       setSelectorSelectedIds([reports[0].id]);
+      loadData([reports[0].id]);
     }
   }, [loadingReports, reports, user, loadData]);
 
