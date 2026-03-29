@@ -631,7 +631,7 @@ export default function OutletSalesPage() {
           </div>
 
           {/* Stat cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5 print:break-after-page">
             <StatCard
               label="Outlet Items Sold"
               value={filteredTransactions
