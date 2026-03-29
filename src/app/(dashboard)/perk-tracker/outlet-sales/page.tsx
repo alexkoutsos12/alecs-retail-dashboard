@@ -838,7 +838,7 @@ export default function OutletSalesPage() {
                   <div
                     key={group.name}
                     className="mb-8"
-                    style={{ breakInside: "avoid" }}
+                    style={{ breakAfter: "page" }}
                   >
                     <h3 className="font-heading font-bold text-base mb-1">
                       {group.name}
