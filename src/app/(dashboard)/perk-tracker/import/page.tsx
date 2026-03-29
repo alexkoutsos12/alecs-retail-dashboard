@@ -22,12 +22,12 @@ import {
   doc,
   setDoc,
   deleteDoc,
+  writeBatch,
   serverTimestamp,
 } from "firebase/firestore";
 import toast from "react-hot-toast";
 import {
   ref as storageRef,
-  uploadBytes,
   deleteObject,
 } from "firebase/storage";
 import {
@@ -47,7 +47,7 @@ interface ReportDoc {
   uploadedBy: string;
   uploadedByName: string;
   uploadedAt: { toDate: () => Date } | null;
-  storagePath: string;
+  storagePath?: string;
 }
 
 interface SuccessData {
@@ -227,22 +227,35 @@ export default function ImportPage() {
         try {
           setImportState("uploading");
 
-          // Remove overlapping reports
+          // Remove overlapping reports (and their subcollections)
           for (const r of overlapping) {
-            try {
-              await deleteObject(storageRef(storage, r.storagePath));
-            } catch {
-              // File may not exist in Storage
+            if (r.storagePath) {
+              try {
+                await deleteObject(storageRef(storage, r.storagePath));
+              } catch {
+                // File may not exist in Storage
+              }
+            }
+            const oldTxnsSnap = await getDocs(
+              collection(db, "reports", r.id, "transactions")
+            );
+            for (let i = 0; i < oldTxnsSnap.docs.length; i += 500) {
+              const b = writeBatch(db);
+              oldTxnsSnap.docs.slice(i, i + 500).forEach((d) => b.delete(d.ref));
+              await b.commit();
             }
             await deleteDoc(doc(db, "reports", r.id));
           }
 
-          // Upload transactions JSON
-          const storagePath = `reports/${reportId}/transactions.json`;
-          const jsonBlob = new Blob([JSON.stringify(transactions)], {
-            type: "application/json",
-          });
-          await uploadBytes(storageRef(storage, storagePath), jsonBlob);
+          // Write transactions to Firestore subcollection in batches of 500
+          const txnsRef = collection(db, "reports", reportId, "transactions");
+          for (let i = 0; i < transactions.length; i += 500) {
+            const batch = writeBatch(db);
+            transactions.slice(i, i + 500).forEach((txn) => {
+              batch.set(doc(txnsRef, txn.id), txn);
+            });
+            await batch.commit();
+          }
 
           // Compute summary stats
           const totalOutletItems = transactions.filter((t) => t.isOutlet).length;
@@ -274,7 +287,6 @@ export default function ImportPage() {
             uploadedByName:
               user.displayName || user.email || "Unknown",
             uploadedAt: serverTimestamp(),
-            storagePath,
           });
 
           setSuccessData({
@@ -321,10 +333,20 @@ export default function ImportPage() {
 
   const handleDelete = async (report: ReportDoc) => {
     try {
-      try {
-        await deleteObject(storageRef(storage, report.storagePath));
-      } catch {
-        // File may not exist
+      if (report.storagePath) {
+        try {
+          await deleteObject(storageRef(storage, report.storagePath));
+        } catch {
+          // File may not exist
+        }
+      }
+      const txnsSnap = await getDocs(
+        collection(db, "reports", report.id, "transactions")
+      );
+      for (let i = 0; i < txnsSnap.docs.length; i += 500) {
+        const batch = writeBatch(db);
+        txnsSnap.docs.slice(i, i + 500).forEach((d) => batch.delete(d.ref));
+        await batch.commit();
       }
       await deleteDoc(doc(db, "reports", report.id));
       setDeleteDialog(null);

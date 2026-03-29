@@ -10,7 +10,7 @@ import {
 import Link from "next/link";
 import { ChevronRight, Download, Printer, ChevronDown, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { db, storage } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import {
   collection,
   query,
@@ -18,7 +18,6 @@ import {
   orderBy,
   getDocs,
 } from "firebase/firestore";
-import { ref as storageRef, getBytes } from "firebase/storage";
 import { Transaction } from "@/lib/parsers/parseSalesJournal";
 import ImportSelector, {
   ReportMeta,
@@ -267,10 +266,12 @@ export default function PerkPayoutPage() {
             merged.push(...cacheRef.current.get(id)!);
             continue;
           }
-          const report = reports.find((r) => r.id === id);
-          if (!report) continue;
-          const bytes = await getBytes(storageRef(storage, report.storagePath));
-          const txns: Transaction[] = JSON.parse(new TextDecoder().decode(bytes));
+          const txnsSnap = await getDocs(
+            collection(db, "reports", id, "transactions")
+          );
+          const txns: Transaction[] = txnsSnap.docs.map(
+            (d) => d.data() as Transaction
+          );
           cacheRef.current.set(id, txns);
           merged.push(...txns);
         }
