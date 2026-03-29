@@ -53,7 +53,7 @@ function parseTicketHeader(col0Str: string): TicketContext | null {
 
   const dateMatch = normalized.match(/on\s+(\d{2}\/\d{2}\/\d{4})/);
   const timeMatch = normalized.match(/(\d{1,2}:\d{2}\s+[AP]M)/);
-  const cashierMatch = normalized.match(/by Cashier:\s+(.*?)\s+for Customer:/);
+  const cashierMatch = normalized.match(/by Cashier:\s+(.*?)(?:\s+for Customer:|$)/);
   const customerMatch = normalized.match(/for Customer:\s+\d+\s+(.*?)$/);
 
   const dateStr = dateMatch?.[1] ?? "";
