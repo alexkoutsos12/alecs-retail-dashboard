@@ -5,7 +5,7 @@ export interface ReportMeta {
   filename: string;
   dateRange: { start: string; end: string };
   totalTransactions: number;
-  storagePath?: string;
+  storagePath: string;
 }
 
 interface Props {

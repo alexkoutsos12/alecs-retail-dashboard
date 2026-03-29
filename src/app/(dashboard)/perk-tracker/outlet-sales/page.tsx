@@ -10,7 +10,7 @@ import {
 import Link from "next/link";
 import { ChevronRight, Download, Printer, ChevronDown } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { db } from "@/lib/firebase";
+import { db, storage } from "@/lib/firebase";
 import {
   collection,
   query,
@@ -18,6 +18,7 @@ import {
   orderBy,
   getDocs,
 } from "firebase/firestore";
+import { ref as storageRef, getDownloadURL } from "firebase/storage";
 import { Transaction } from "@/lib/parsers/parseSalesJournal";
 import ImportSelector, {
   ReportMeta,
@@ -254,12 +255,12 @@ export default function OutletSalesPage() {
             merged.push(...cacheRef.current.get(id)!);
             continue;
           }
-          const txnsSnap = await getDocs(
-            collection(db, "reports", id, "transactions")
-          );
-          const txns: Transaction[] = txnsSnap.docs.map(
-            (d) => d.data() as Transaction
-          );
+          const report = reports.find((r) => r.id === id);
+          if (!report?.storagePath) continue;
+          const url = await getDownloadURL(storageRef(storage, report.storagePath));
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
+          const txns: Transaction[] = await res.json();
           cacheRef.current.set(id, txns);
           merged.push(...txns);
         }
