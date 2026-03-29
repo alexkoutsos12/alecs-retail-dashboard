@@ -257,8 +257,8 @@ export default function OutletSalesPage() {
           }
           const report = reports.find((r) => r.id === id);
           if (!report?.storagePath) continue;
-          const url = await getDownloadURL(storageRef(storage, report.storagePath));
-          const res = await fetch(url);
+          const downloadUrl = await getDownloadURL(storageRef(storage, report.storagePath));
+          const res = await fetch(`/api/storage-proxy?url=${encodeURIComponent(downloadUrl)}`);
           if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
           const txns: Transaction[] = await res.json();
           cacheRef.current.set(id, txns);
