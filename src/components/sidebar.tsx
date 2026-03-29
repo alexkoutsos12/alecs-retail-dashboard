@@ -49,7 +49,7 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="fixed left-0 top-0 h-full w-[200px] bg-brand-green flex flex-col z-50">
+    <aside className="fixed left-0 top-0 h-full w-[200px] bg-brand-green flex flex-col z-50 print:hidden">
       <div className="px-4 pt-5 pb-4">
         <h1 className="font-heading text-brand-cream text-lg font-bold leading-tight">
           Alec&apos;s Dashboard
