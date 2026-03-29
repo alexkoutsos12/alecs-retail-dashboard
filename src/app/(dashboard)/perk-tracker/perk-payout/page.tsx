@@ -18,7 +18,7 @@ import {
   orderBy,
   getDocs,
 } from "firebase/firestore";
-import { ref as storageRef, getDownloadURL } from "firebase/storage";
+import { ref as storageRef, getBytes } from "firebase/storage";
 import { Transaction } from "@/lib/parsers/parseSalesJournal";
 import ImportSelector, {
   ReportMeta,
@@ -269,12 +269,8 @@ export default function PerkPayoutPage() {
           }
           const report = reports.find((r) => r.id === id);
           if (!report) continue;
-          const url = await getDownloadURL(
-            storageRef(storage, report.storagePath)
-          );
-          const res = await fetch(url);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const txns: Transaction[] = await res.json();
+          const bytes = await getBytes(storageRef(storage, report.storagePath));
+          const txns: Transaction[] = JSON.parse(new TextDecoder().decode(bytes));
           cacheRef.current.set(id, txns);
           merged.push(...txns);
         }
