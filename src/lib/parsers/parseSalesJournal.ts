@@ -85,6 +85,7 @@ export async function parseSalesJournal(
   interface ColMap {
     item: number;       // SKU\nProduct\nSize
     salesperson: number;
+    sold: number;       // quantity sold on this line
     retail: number;
     salePrice: number;
     perks: number;
@@ -93,7 +94,7 @@ export async function parseSalesJournal(
 
   function detectColumns(sheetRows: unknown[][]): ColMap {
     // Default layout (Sheet 0 / single-day files)
-    const defaults: ColMap = { item: 2, salesperson: 5, retail: 12, salePrice: 13, perks: 15, markdown: 16 };
+    const defaults: ColMap = { item: 2, salesperson: 5, sold: 8, retail: 12, salePrice: 13, perks: 15, markdown: 16 };
 
     for (let i = 0; i < Math.min(sheetRows.length, 40); i++) {
       const row = sheetRows[i];
@@ -116,10 +117,7 @@ export async function parseSalesJournal(
         if (v === "Price") map.salePrice = c;
         if (v === "Perks") map.perks = c;
         if (v === "Markdown") map.markdown = c;
-        if (v === "Sold") {
-          // SKU column is typically 2 before Sold, salesperson is Sold - 1
-          // But more reliably: find them from sale rows below
-        }
+        if (v === "Sold") map.sold = c;
       }
 
       // Find item and salesperson columns from the first actual sale row
@@ -233,9 +231,13 @@ export async function parseSalesJournal(
       const salePriceRaw = row[cols.salePrice];
       const perksRaw = row[cols.perks];
       const markdownRaw = row[cols.markdown];
+      const soldRaw = row[cols.sold];
       const retailPrice = typeof retailRaw === "number" ? retailRaw : 0;
       const salePrice = typeof salePriceRaw === "number" ? salePriceRaw : 0;
-      const perks = typeof perksRaw === "number" ? perksRaw : 0;
+      const soldQty = typeof soldRaw === "number" && soldRaw > 0 ? soldRaw : 1;
+      // Perks column is the total for the line; divide by quantity to get per-unit perk
+      const perksTotal = typeof perksRaw === "number" ? perksRaw : 0;
+      const perks = soldQty > 1 ? perksTotal / soldQty : perksTotal;
       const markdown = typeof markdownRaw === "number" ? markdownRaw : 0;
 
       const isOutlet = perks === 1;
