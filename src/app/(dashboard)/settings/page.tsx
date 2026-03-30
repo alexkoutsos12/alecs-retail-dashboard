@@ -10,6 +10,7 @@ import {
   collection,
   getDocs,
   doc,
+  setDoc,
   updateDoc,
   deleteDoc,
   query,
@@ -100,6 +101,14 @@ export default function SettingsPage() {
   const [loadingReports, setLoadingReports] = useState(true);
   const [reportsError, setReportsError] = useState<string | null>(null);
 
+  const [allowedEmails, setAllowedEmails] = useState<string[]>([]);
+  const [loadingEmails, setLoadingEmails] = useState(true);
+  const [emailsError, setEmailsError] = useState<string | null>(null);
+  const [newEmail, setNewEmail] = useState("");
+  const [removeEmailDialog, setRemoveEmailDialog] = useState<string | null>(
+    null
+  );
+
   const [deleteDialog, setDeleteDialog] = useState<ReportDoc | null>(null);
 
   useEffect(() => {
@@ -138,12 +147,60 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const fetchAllowedEmails = useCallback(async () => {
+    setLoadingEmails(true);
+    setEmailsError(null);
+    try {
+      const snap = await getDocs(collection(db, "allowedEmails"));
+      setAllowedEmails(snap.docs.map((d) => d.id).sort());
+    } catch {
+      setEmailsError("Failed to load allowed emails.");
+    } finally {
+      setLoadingEmails(false);
+    }
+  }, []);
+
+  const handleAddEmail = async () => {
+    const email = newEmail.trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      toast.error("Please enter a valid email address.");
+      return;
+    }
+    if (allowedEmails.includes(email)) {
+      toast.error("Email already in the list.");
+      return;
+    }
+    try {
+      await setDoc(doc(db, "allowedEmails", email), {
+        addedBy: user?.email || "",
+        addedAt: new Date().toISOString(),
+      });
+      setAllowedEmails((prev) => [...prev, email].sort());
+      setNewEmail("");
+      toast.success("Email added.");
+    } catch {
+      toast.error("Failed to add email.");
+    }
+  };
+
+  const handleRemoveEmail = async (email: string) => {
+    try {
+      await deleteDoc(doc(db, "allowedEmails", email));
+      setAllowedEmails((prev) => prev.filter((e) => e !== email));
+      setRemoveEmailDialog(null);
+      toast.success("Email removed.");
+    } catch {
+      toast.error("Failed to remove email.");
+    }
+  };
+
   useEffect(() => {
     if (userData?.role === "admin") {
       fetchUsers();
       fetchReports();
+      fetchAllowedEmails();
     }
-  }, [userData?.role, fetchUsers, fetchReports]);
+  }, [userData?.role, fetchUsers, fetchReports, fetchAllowedEmails]);
 
   const handleRoleChange = async (
     uid: string,
@@ -210,6 +267,35 @@ export default function SettingsPage() {
 
   return (
     <div>
+      {/* Remove email confirmation dialog */}
+      {removeEmailDialog && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full shadow-xl">
+            <h2 className="font-heading text-brand-green text-lg font-bold mb-2">
+              Remove Email
+            </h2>
+            <p className="font-body text-sm text-brand-text/70 mb-5">
+              Remove <strong>{removeEmailDialog}</strong> from the allowed list?
+              They won&apos;t be able to log in unless re-added.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setRemoveEmailDialog(null)}
+                className="px-4 py-2 rounded font-body text-sm text-brand-text/70 border border-brand-cream-dark hover:bg-brand-cream transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleRemoveEmail(removeEmailDialog)}
+                className="px-4 py-2 rounded font-body text-sm bg-red-600 text-white hover:bg-red-700 transition-colors"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete confirmation dialog */}
       {deleteDialog && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -321,7 +407,68 @@ export default function SettingsPage() {
         )}
       </section>
 
-      {/* Section 2 — Reports Management */}
+      {/* Section 2 — Allowed Emails */}
+      <section className="mb-10">
+        <h2 className="font-heading text-brand-green text-lg font-bold mb-3">
+          Allowed Emails
+        </h2>
+        <p className="font-body text-sm text-brand-text/50 mb-3">
+          Only Google accounts matching these emails can log in. Existing users
+          are always allowed regardless of this list.
+        </p>
+
+        {/* Add email input */}
+        <div className="flex gap-2 mb-4">
+          <input
+            type="email"
+            placeholder="new-user@example.com"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleAddEmail()}
+            className="flex-1 font-body text-sm border border-brand-cream-dark rounded px-3 py-2 bg-white focus:outline-none focus:border-brand-green"
+          />
+          <button
+            onClick={handleAddEmail}
+            className="bg-brand-green text-brand-cream font-body text-sm px-4 py-2 rounded hover:bg-brand-green-mid transition-colors whitespace-nowrap"
+          >
+            Add Email
+          </button>
+        </div>
+
+        {loadingEmails ? (
+          <SkeletonTable rows={3} />
+        ) : emailsError ? (
+          <ErrorCard message={emailsError} onRetry={fetchAllowedEmails} />
+        ) : allowedEmails.length === 0 ? (
+          <div className="bg-white border-l-[3px] border-brand-green rounded p-6 text-center">
+            <p className="text-brand-text/40 font-body text-sm">
+              No allowed emails yet. Add one above to let new users log in.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-white border-l-[3px] border-brand-green rounded overflow-hidden">
+            {allowedEmails.map((email) => (
+              <div
+                key={email}
+                className="flex items-center justify-between px-4 py-2.5 border-b border-brand-cream last:border-0"
+              >
+                <span className="font-body text-sm text-brand-text/70">
+                  {email}
+                </span>
+                <button
+                  onClick={() => setRemoveEmailDialog(email)}
+                  className="text-brand-text/30 hover:text-red-500 transition-colors"
+                  title="Remove email"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Section 3 — Reports Management */}
       <section>
         <h2 className="font-heading text-brand-green text-lg font-bold mb-3">
           Reports Management

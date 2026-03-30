@@ -7,7 +7,7 @@ import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 
 export default function LoginPage() {
-  const { user, loading } = useAuth();
+  const { user, loading, accessDenied } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -43,6 +43,19 @@ export default function LoginPage() {
           <p className="text-brand-text/50 text-sm font-body text-center mb-8">
             Internal use only · Alec&apos;s Shoes team
           </p>
+
+          {accessDenied && (
+            <div className="bg-red-50 border border-red-200 rounded p-4 mb-4">
+              <p className="font-body text-sm text-red-700 font-medium mb-1">
+                Access Denied
+              </p>
+              <p className="font-body text-xs text-red-600">
+                Your Google account is not approved to use this dashboard. Ask
+                an admin to add your email in Settings.
+              </p>
+            </div>
+          )}
+
           <button
             onClick={handleGoogleSignIn}
             className="w-full bg-brand-green text-brand-cream font-body text-sm py-2.5 px-4 rounded hover:bg-brand-green-mid transition-colors"
