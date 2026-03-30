@@ -461,7 +461,7 @@ export default function ImportPage() {
               </p>
             ) : (
               <p className="font-body text-sm text-brand-text/50">
-                Drag &amp; drop your .xlsx file here, or click to browse
+                Drag &amp; drop your RICS Sales Journal (.xlsx) here, or click to browse
               </p>
             )}
           </div>
