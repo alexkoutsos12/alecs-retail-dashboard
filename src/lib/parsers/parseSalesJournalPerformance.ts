@@ -34,6 +34,14 @@ const SKIP_VALUES = new Set([
 
 const SKIP_PREFIXES = ["Batch from", "Store "];
 
+// Return reasons that should be excluded — these are credit transfers,
+// not actual product returns.
+const EXCLUDED_RETURN_REASONS = new Set([
+  "5-Club Transfer",
+  "6-Captains Credits",
+  "7-club advance",
+]);
+
 const DAY_NAMES = [
   "Sunday",
   "Monday",
@@ -251,6 +259,24 @@ export async function parseSalesJournalPerformance(
       if (SKIP_PREFIXES.some((p) => col0Str.startsWith(p))) continue;
 
       if (!SALE_TYPES.has(col0Str)) continue;
+
+      // For returns, look ahead for the "Return:" reason row and skip
+      // if it matches an excluded reason (club transfers, credits, etc.)
+      if (col0Str === "Return") {
+        let excluded = false;
+        for (let j = i + 1; j < Math.min(i + 4, rows.length); j++) {
+          const peekRow = rows[j] as unknown[];
+          const peek0 = peekRow?.[0] != null ? String(peekRow[0]).trim() : "";
+          if (peek0 === "Return:") {
+            const reason = peekRow[3] != null ? String(peekRow[3]).trim() : "";
+            if (EXCLUDED_RETURN_REASONS.has(reason)) excluded = true;
+            break;
+          }
+          // Skip past Discount: rows that may sit between Return and Return:
+          if (peek0 !== "Discount:") break;
+        }
+        if (excluded) continue;
+      }
 
       const itemRaw = row[cols.item] != null ? String(row[cols.item]) : "";
       const parts = itemRaw.split("\n");
