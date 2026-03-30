@@ -29,6 +29,7 @@ interface ModuleStats {
   totalTransactions: number;
   uniqueSalespeople: string[];
   uniqueCashiers: string[];
+  dateRange: { start: string; end: string } | null;
   lastImportDate: string | null;
 }
 
@@ -99,6 +100,7 @@ export default function HomePage() {
             totalTransactions: data.totalTransactions ?? 0,
             uniqueSalespeople: data.uniqueSalespeople ?? [],
             uniqueCashiers: data.uniqueCashiers ?? [],
+            dateRange: data.dateRange ?? null,
             lastImportDate: data.uploadedAt
               ? data.uploadedAt.toDate().toLocaleDateString("en-US", {
                   month: "2-digit",
@@ -162,10 +164,8 @@ export default function HomePage() {
                   {stats ? (
                     <p className="text-brand-text/40 text-xs font-body mb-4">
                       {mod.id === "perk-tracker"
-                        ? `${stats.totalOutletItems} outlet items · ${stats.totalPerkItems} perk items`
-                        : `${stats.totalTransactions} transactions · ${stats.uniqueSalespeople.length} salespeople · ${stats.uniqueCashiers.length} cashiers`}
-                      {" · Last import: "}
-                      {stats.lastImportDate}
+                        ? `${stats.totalOutletItems} outlet items · ${stats.totalPerkItems} perk items · Last import: ${stats.lastImportDate}`
+                        : `${stats.uniqueSalespeople.length} salespeople · ${stats.uniqueCashiers.length} cashiers · Last import: ${stats.dateRange ? `${fmt(stats.dateRange.start)} – ${fmt(stats.dateRange.end)}` : stats.lastImportDate}`}
                     </p>
                   ) : (
                     <p className="text-brand-text/40 text-xs font-body mb-4">
