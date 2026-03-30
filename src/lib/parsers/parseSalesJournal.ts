@@ -78,17 +78,21 @@ export async function parseSalesJournal(
   onProgress?: (current: number, total: number) => void
 ): Promise<Transaction[]> {
   const wb = XLSX.read(buffer, { type: "array" });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const allRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-    header: 1,
-    defval: null,
-  });
-
-  // Skip rows 0–5; data begins at row index 6
-  const rows = allRows.slice(6);
-  const total = rows.length;
   const transactions: Transaction[] = [];
 
+  // Collect all rows from every sheet (each sheet is one day)
+  const allRows: unknown[][] = [];
+  for (const name of wb.SheetNames) {
+    const sheet = wb.Sheets[name];
+    const sheetRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      defval: null,
+    });
+    // Skip rows 0–5 per sheet; data begins at row index 6
+    allRows.push(...sheetRows.slice(6));
+  }
+
+  const total = allRows.length;
   const CHUNK_SIZE = 50;
 
   let currentTicket: TicketContext = {
@@ -99,13 +103,13 @@ export async function parseSalesJournal(
     customerName: "",
   };
 
-  for (let i = 0; i < rows.length; i++) {
+  for (let i = 0; i < allRows.length; i++) {
     if (i % CHUNK_SIZE === 0) {
       onProgress?.(i, total);
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
 
-    const row = rows[i] as unknown[];
+    const row = allRows[i] as unknown[];
     const col0 = row[0];
 
     // Skip null / undefined / empty / NaN
