@@ -141,12 +141,13 @@ function getMonthKey(dateStr: string): string {
 
 function InfoBubble({ text }: { text: string }) {
   return (
-    <span
-      title={text}
-      onClick={(e) => e.stopPropagation()}
-      className="inline-flex items-center justify-center ml-1 w-4 h-4 rounded-full bg-brand-text/15 text-brand-text/50 text-[10px] font-bold cursor-help select-none hover:bg-brand-text/25 transition-colors"
-    >
-      ?
+    <span className="relative group inline-flex items-center ml-1">
+      <span className="w-4 h-4 rounded-full bg-brand-text/15 text-brand-text/50 text-[10px] font-bold flex items-center justify-center cursor-help hover:bg-brand-text/25 transition-colors">
+        ?
+      </span>
+      <span className="absolute top-full left-0 mt-1.5 px-2.5 py-1.5 rounded bg-brand-green text-brand-cream text-[10px] font-body leading-snug whitespace-normal w-52 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-md">
+        {text}
+      </span>
     </span>
   );
 }
