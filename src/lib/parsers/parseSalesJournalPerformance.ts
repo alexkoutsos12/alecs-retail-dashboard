@@ -192,9 +192,8 @@ export async function parseSalesJournalPerformance(
   const CHUNK_SIZE = 50;
   let processedRows = 0;
 
-  // Skip Sheet 0 when there are multiple sheets (it's the RICS summary)
-  const sheetNames =
-    wb.SheetNames.length > 1 ? wb.SheetNames.slice(1) : wb.SheetNames;
+  // Parse all sheets — each sheet is one day's data
+  const sheetNames = wb.SheetNames;
 
   // First pass: count rows and detect columns per sheet
   let totalRows = 0;
