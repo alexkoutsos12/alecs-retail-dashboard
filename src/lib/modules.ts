@@ -26,7 +26,6 @@ export const appModules: AppModule[] = [
       "Outlet sales and employee perk payouts from the RICS Sales Journal.",
     firestoreModule: "perk-tracker",
     navItems: [
-      { label: "Import", href: "/perk-tracker/import", icon: "Upload" },
       {
         label: "Outlet Sales",
         href: "/perk-tracker/outlet-sales",
@@ -37,6 +36,7 @@ export const appModules: AppModule[] = [
         href: "/perk-tracker/perk-payout",
         icon: "Gift",
       },
+      { label: "Import", href: "/perk-tracker/import", icon: "Upload" },
     ],
     importRoute: "/perk-tracker/import",
     reportRoutes: [
@@ -51,7 +51,6 @@ export const appModules: AppModule[] = [
       "Salesperson and cashier performance metrics from the RICS Sales Journal.",
     firestoreModule: "team-performance",
     navItems: [
-      { label: "Import", href: "/team-performance/import", icon: "Upload" },
       {
         label: "Salesperson",
         href: "/team-performance/salesperson",
@@ -62,6 +61,7 @@ export const appModules: AppModule[] = [
         href: "/team-performance/cashier",
         icon: "BarChart3",
       },
+      { label: "Import", href: "/team-performance/import", icon: "Upload" },
     ],
     importRoute: "/team-performance/import",
     reportRoutes: [
