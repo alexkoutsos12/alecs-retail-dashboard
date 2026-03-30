@@ -80,7 +80,9 @@ export async function parseSalesJournal(
   const wb = XLSX.read(buffer, { type: "array" });
   const transactions: Transaction[] = [];
 
-  // Collect all rows from every sheet (each sheet is one day)
+  // Collect transaction rows from every sheet (each sheet is one day).
+  // Sheets 1+ have a variable-length summary section before the data,
+  // so we find where transactions start by looking for "Batch from" or "Ticket ".
   const allRows: unknown[][] = [];
   for (const name of wb.SheetNames) {
     const sheet = wb.Sheets[name];
@@ -88,8 +90,18 @@ export async function parseSalesJournal(
       header: 1,
       defval: null,
     });
-    // Skip rows 0–5 per sheet; data begins at row index 6
-    allRows.push(...sheetRows.slice(6));
+    // Find the first row that starts with "Batch from" or "Ticket " — that's where data begins
+    let dataStart = 0;
+    for (let i = 0; i < sheetRows.length; i++) {
+      const c0 = sheetRows[i]?.[0];
+      if (c0 == null) continue;
+      const s = String(c0).trim();
+      if (s.startsWith("Batch from") || /^Ticket \d+/.test(s)) {
+        dataStart = i;
+        break;
+      }
+    }
+    allRows.push(...sheetRows.slice(dataStart));
   }
 
   const total = allRows.length;
