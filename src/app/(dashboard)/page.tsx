@@ -26,6 +26,9 @@ interface ReportRow {
 interface ModuleStats {
   totalOutletItems: number;
   totalPerkItems: number;
+  totalTransactions: number;
+  uniqueSalespeople: string[];
+  uniqueCashiers: string[];
   lastImportDate: string | null;
 }
 
@@ -93,6 +96,9 @@ export default function HomePage() {
           statsMap[mod.id] = {
             totalOutletItems: data.totalOutletItems ?? 0,
             totalPerkItems: data.totalPerkItems ?? 0,
+            totalTransactions: data.totalTransactions ?? 0,
+            uniqueSalespeople: data.uniqueSalespeople ?? [],
+            uniqueCashiers: data.uniqueCashiers ?? [],
             lastImportDate: data.uploadedAt
               ? data.uploadedAt.toDate().toLocaleDateString("en-US", {
                   month: "2-digit",
@@ -155,8 +161,10 @@ export default function HomePage() {
                   </p>
                   {stats ? (
                     <p className="text-brand-text/40 text-xs font-body mb-4">
-                      {stats.totalOutletItems} outlet items ·{" "}
-                      {stats.totalPerkItems} perk items · Last import:{" "}
+                      {mod.id === "perk-tracker"
+                        ? `${stats.totalOutletItems} outlet items · ${stats.totalPerkItems} perk items`
+                        : `${stats.totalTransactions} transactions · ${stats.uniqueSalespeople.length} salespeople · ${stats.uniqueCashiers.length} cashiers`}
+                      {" · Last import: "}
                       {stats.lastImportDate}
                     </p>
                   ) : (
@@ -185,12 +193,6 @@ export default function HomePage() {
               );
             })}
 
-        {/* Placeholder for future module */}
-        <div className="border-2 border-dashed border-brand-cream-dark rounded p-6 flex items-center justify-center">
-          <p className="text-brand-text/30 font-body text-sm">
-            New module coming soon
-          </p>
-        </div>
       </div>
 
       {/* Recent imports */}

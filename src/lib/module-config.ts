@@ -20,11 +20,14 @@ export const modules: ModuleConfig[] = [
     ],
   },
   {
-    id: "placeholder",
-    title: "New module coming soon",
-    description: "",
-    firestoreModule: "",
-    buttons: [],
-    placeholder: true,
+    id: "team-performance",
+    title: "Team Performance",
+    description:
+      "Salesperson and cashier performance metrics from the RICS Sales Journal.",
+    firestoreModule: "team-performance",
+    buttons: [
+      { label: "Salesperson →", href: "/team-performance/salesperson" },
+      { label: "Cashier →", href: "/team-performance/cashier" },
+    ],
   },
 ];

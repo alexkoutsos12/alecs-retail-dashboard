@@ -11,6 +11,8 @@ import {
   Upload,
   ShoppingBag,
   Gift,
+  Users,
+  BarChart3,
   Settings,
   LogOut,
   X,
@@ -22,6 +24,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Upload,
   ShoppingBag,
   Gift,
+  Users,
+  BarChart3,
 };
 
 interface SidebarProps {
@@ -105,15 +109,6 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
           </div>
         ))}
 
-        {/* Coming soon placeholder */}
-        <div>
-          <p className="px-2 text-[10px] uppercase tracking-wider text-brand-cream/20 font-body mb-1">
-            More modules
-          </p>
-          <p className="px-3 py-1.5 text-xs text-brand-cream/20 italic">
-            Coming soon
-          </p>
-        </div>
       </nav>
 
       {/* Settings (admin only) */}

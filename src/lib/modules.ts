@@ -44,4 +44,29 @@ export const appModules: AppModule[] = [
       { label: "Perk Payout →", href: "/perk-tracker/perk-payout" },
     ],
   },
+  {
+    id: "team-performance",
+    name: "Team Performance",
+    description:
+      "Salesperson and cashier performance metrics from the RICS Sales Journal.",
+    firestoreModule: "team-performance",
+    navItems: [
+      { label: "Import", href: "/team-performance/import", icon: "Upload" },
+      {
+        label: "Salesperson",
+        href: "/team-performance/salesperson",
+        icon: "Users",
+      },
+      {
+        label: "Cashier",
+        href: "/team-performance/cashier",
+        icon: "BarChart3",
+      },
+    ],
+    importRoute: "/team-performance/import",
+    reportRoutes: [
+      { label: "Salesperson →", href: "/team-performance/salesperson" },
+      { label: "Cashier →", href: "/team-performance/cashier" },
+    ],
+  },
 ];
