@@ -102,15 +102,40 @@ function saveSaved(uid: string, s: SavedState) {
 // ─── Info Bubble ─────────────────────────────────────────────────────────────
 
 function InfoBubble({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 6, left: r.left + r.width / 2 });
+    }
+    setOpen((o) => !o);
+  };
+
   return (
-    <span className="relative group inline-flex items-center ml-1">
-      <span className="w-3.5 h-3.5 rounded-full bg-brand-text/10 text-brand-text/40 text-[9px] font-bold flex items-center justify-center cursor-help">
+    <>
+      <span
+        ref={btnRef}
+        onClick={toggle}
+        className="inline-flex items-center justify-center ml-1 w-3.5 h-3.5 rounded-full bg-brand-text/10 text-brand-text/40 text-[9px] font-bold cursor-help select-none"
+      >
         ?
       </span>
-      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded bg-brand-green text-brand-cream text-[10px] font-body leading-snug whitespace-normal w-56 text-center opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-md">
-        {text}
-      </span>
-    </span>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-50" onClick={toggle} />
+          <div
+            className="fixed z-50 px-3 py-2 rounded bg-brand-green text-brand-cream text-[11px] font-body leading-snug w-56 text-center shadow-lg"
+            style={{ top: pos.top, left: pos.left, transform: "translateX(-50%)" }}
+          >
+            {text}
+          </div>
+        </>
+      )}
+    </>
   );
 }
 
