@@ -114,11 +114,17 @@ function triggerDownload(csv: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function getWeekNumber(dateStr: string): number {
+function getWeekSunday(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00");
-  const start = new Date(d.getFullYear(), 0, 1);
-  const diff = d.getTime() - start.getTime();
-  return Math.ceil((diff / 86400000 + start.getDay() + 1) / 7);
+  const day = d.getDay(); // 0=Sun
+  d.setDate(d.getDate() - day);
+  return d.toISOString().slice(0, 10);
+}
+
+function formatWeekLabel(sundayStr: string): string {
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const [, m, d] = sundayStr.split("-");
+  return `${months[parseInt(m, 10) - 1]} ${parseInt(d, 10)}`;
 }
 
 function getMonthLabel(dateStr: string): string {
@@ -129,6 +135,21 @@ function getMonthLabel(dateStr: string): string {
 
 function getMonthKey(dateStr: string): string {
   return dateStr.slice(0, 7); // YYYY-MM
+}
+
+// ─── Info Bubble ─────────────────────────────────────────────────────────────
+
+function InfoBubble({ text }: { text: string }) {
+  return (
+    <span className="relative group inline-flex items-center ml-1">
+      <span className="w-3.5 h-3.5 rounded-full bg-brand-text/10 text-brand-text/40 text-[9px] font-bold flex items-center justify-center cursor-help">
+        ?
+      </span>
+      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded bg-brand-green text-brand-cream text-[10px] font-body leading-snug whitespace-normal w-52 text-center opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-md">
+        {text}
+      </span>
+    </span>
+  );
 }
 
 // ─── Bar Chart ───────────────────────────────────────────────────────────────
@@ -231,14 +252,14 @@ function ExpandedRow({
     }
 
     if (chartMode === "week") {
-      const weekMap = new Map<number, number>();
+      const weekMap = new Map<string, number>();
       for (const t of sales) {
-        const wk = getWeekNumber(t.date);
-        weekMap.set(wk, (weekMap.get(wk) ?? 0) + 1);
+        const sun = getWeekSunday(t.date);
+        weekMap.set(sun, (weekMap.get(sun) ?? 0) + 1);
       }
-      const sorted = [...weekMap.entries()].sort((a, b) => a[0] - b[0]);
-      return sorted.map(([wk, count]) => ({
-        label: `Wk ${wk}`,
+      const sorted = [...weekMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      return sorted.map(([sun, count]) => ({
+        label: formatWeekLabel(sun),
         value: count,
       }));
     }
@@ -272,8 +293,11 @@ function ExpandedRow({
         {/* Chart */}
         <div className="mb-4">
           <div className="flex items-center gap-2 mb-3">
-            <span className="font-body text-xs text-brand-text/50">
+            <span className="font-body text-xs text-brand-text/50 flex items-center">
               Units Sold
+              {chartMode === "dow" && (
+                <InfoBubble text="Average units sold per day. Total units on each day of the week divided by the number of times that day appears in the filtered date range." />
+              )}
             </span>
             <div className="flex border border-brand-cream-dark rounded overflow-hidden font-body text-xs ml-auto">
               {(["month", "week", "dow"] as ChartMode[]).map((mode) => (

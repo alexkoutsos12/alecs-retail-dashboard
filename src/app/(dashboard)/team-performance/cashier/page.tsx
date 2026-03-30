@@ -99,6 +99,21 @@ function saveSaved(uid: string, s: SavedState) {
   } catch {}
 }
 
+// ─── Info Bubble ─────────────────────────────────────────────────────────────
+
+function InfoBubble({ text }: { text: string }) {
+  return (
+    <span className="relative group inline-flex items-center ml-1">
+      <span className="w-3.5 h-3.5 rounded-full bg-brand-text/10 text-brand-text/40 text-[9px] font-bold flex items-center justify-center cursor-help">
+        ?
+      </span>
+      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded bg-brand-green text-brand-cream text-[10px] font-body leading-snug whitespace-normal w-56 text-center opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-md">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmt(d: string) {
@@ -769,6 +784,7 @@ export default function CashierPage() {
                         onClick={() => handleSort("selfClosedRate")}
                       >
                         Self-Closed Rate %
+                        <InfoBubble text="Percentage of tickets where this cashier was also the salesperson on every item. Shows how often they completed the full customer journey — selling and ringing up." />
                         <SortIcon col="selfClosedRate" />
                       </th>
                     </tr>
