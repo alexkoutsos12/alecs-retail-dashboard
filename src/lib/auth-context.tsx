@@ -40,45 +40,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        const email = firebaseUser.email?.toLowerCase() || "";
-        const userRef = doc(db, "users", firebaseUser.uid);
-        const userSnap = await getDoc(userRef);
+        try {
+          const email = firebaseUser.email?.toLowerCase() || "";
+          const userRef = doc(db, "users", firebaseUser.uid);
+          const userSnap = await getDoc(userRef);
 
-        if (userSnap.exists()) {
-          // Existing user — always allowed
-          await updateDoc(userRef, {
-            name: firebaseUser.displayName || "",
-            photoURL: firebaseUser.photoURL || "",
-          });
-          const updated = await getDoc(userRef);
-          setUser(firebaseUser);
-          setUserData(updated.data() as UserData);
-          setAccessDenied(false);
-        } else {
-          // New user — check allowlist
-          const allowRef = doc(db, "allowedEmails", email);
-          const allowSnap = await getDoc(allowRef);
-
-          if (allowSnap.exists()) {
-            // Approved — create their user doc
-            const newUser: UserData = {
-              email,
+          if (userSnap.exists()) {
+            // Existing user — always allowed
+            await updateDoc(userRef, {
               name: firebaseUser.displayName || "",
               photoURL: firebaseUser.photoURL || "",
-              role: "manager",
-              createdAt: serverTimestamp(),
-            };
-            await setDoc(userRef, newUser);
+            });
+            const updated = await getDoc(userRef);
             setUser(firebaseUser);
-            setUserData(newUser);
+            setUserData(updated.data() as UserData);
             setAccessDenied(false);
           } else {
-            // Not approved — sign out
-            setAccessDenied(true);
-            setUser(null);
-            setUserData(null);
-            await signOut(auth);
+            // New user — check allowlist
+            const allowRef = doc(db, "allowedEmails", email);
+            const allowSnap = await getDoc(allowRef);
+
+            if (allowSnap.exists()) {
+              // Approved — create their user doc
+              const newUser: UserData = {
+                email,
+                name: firebaseUser.displayName || "",
+                photoURL: firebaseUser.photoURL || "",
+                role: "manager",
+                createdAt: serverTimestamp(),
+              };
+              await setDoc(userRef, newUser);
+              setUser(firebaseUser);
+              setUserData(newUser);
+              setAccessDenied(false);
+            } else {
+              // Not approved — sign out
+              setAccessDenied(true);
+              setUser(null);
+              setUserData(null);
+              await signOut(auth);
+            }
           }
+        } catch {
+          // Firestore permission denied or network error — treat as not approved
+          setAccessDenied(true);
+          setUser(null);
+          setUserData(null);
+          await signOut(auth);
         }
       } else {
         setUser(null);
