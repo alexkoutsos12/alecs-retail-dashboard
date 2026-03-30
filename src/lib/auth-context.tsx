@@ -18,6 +18,7 @@ interface AuthContextType {
   userData: UserData | null;
   loading: boolean;
   accessDenied: boolean;
+  clearAccessDenied: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -25,6 +26,7 @@ const AuthContext = createContext<AuthContextType>({
   userData: null,
   loading: true,
   accessDenied: false,
+  clearAccessDenied: () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -32,6 +34,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
+
+  const clearAccessDenied = () => setAccessDenied(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -88,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, userData, loading, accessDenied }}>
+    <AuthContext.Provider value={{ user, userData, loading, accessDenied, clearAccessDenied }}>
       {children}
     </AuthContext.Provider>
   );

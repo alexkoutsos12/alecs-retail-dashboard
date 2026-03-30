@@ -9,11 +9,12 @@ import {
   createUserWithEmailAndPassword,
   updateProfile,
 } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 
 export default function LoginPage() {
-  const { user, loading, accessDenied } = useAuth();
+  const { user, loading, accessDenied, clearAccessDenied } = useAuth();
   const router = useRouter();
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -41,10 +42,21 @@ export default function LoginPage() {
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setEmailError(null);
+    clearAccessDenied();
     setSubmitting(true);
 
     try {
       if (mode === "signup") {
+        // Check allowlist BEFORE creating the account
+        const emailLower = email.trim().toLowerCase();
+        const allowSnap = await getDoc(doc(db, "allowedEmails", emailLower));
+        if (!allowSnap.exists()) {
+          setEmailError(
+            "This email is not approved to use the dashboard. Ask an admin to add your email in Settings."
+          );
+          return;
+        }
+
         const cred = await createUserWithEmailAndPassword(
           auth,
           email,
@@ -54,20 +66,47 @@ export default function LoginPage() {
           await updateProfile(cred.user, { displayName: name.trim() });
         }
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        // Try signing in
+        try {
+          await signInWithEmailAndPassword(auth, email, password);
+        } catch (err: unknown) {
+          const code = (err as { code?: string }).code || "";
+
+          // If credentials are invalid, check if the email is even on the allowlist
+          if (
+            code === "auth/user-not-found" ||
+            code === "auth/invalid-credential"
+          ) {
+            const emailLower = email.trim().toLowerCase();
+            const allowSnap = await getDoc(
+              doc(db, "allowedEmails", emailLower)
+            );
+            if (!allowSnap.exists()) {
+              setEmailError(
+                "This email is not approved to use the dashboard. Ask an admin to add your email in Settings."
+              );
+            } else {
+              setEmailError(
+                "Invalid email or password. If you don\u2019t have an account yet, click \"Create one\" below."
+              );
+            }
+            return;
+          }
+          throw err; // re-throw other errors
+        }
       }
     } catch (err: unknown) {
       const code = (err as { code?: string }).code || "";
-      if (code === "auth/user-not-found" || code === "auth/invalid-credential") {
-        setEmailError("Invalid email or password.");
-      } else if (code === "auth/wrong-password") {
-        setEmailError("Invalid email or password.");
-      } else if (code === "auth/email-already-in-use") {
-        setEmailError("An account with this email already exists. Try signing in.");
+      if (code === "auth/email-already-in-use") {
+        setEmailError(
+          "An account with this email already exists. Try signing in."
+        );
       } else if (code === "auth/weak-password") {
         setEmailError("Password must be at least 6 characters.");
       } else if (code === "auth/invalid-email") {
         setEmailError("Please enter a valid email address.");
+      } else if (code === "auth/wrong-password") {
+        setEmailError("Invalid email or password.");
       } else {
         setEmailError("Something went wrong. Please try again.");
       }
