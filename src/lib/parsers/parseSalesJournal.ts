@@ -80,17 +80,91 @@ export async function parseSalesJournal(
   const wb = XLSX.read(buffer, { type: "array" });
   const transactions: Transaction[] = [];
 
-  // Collect transaction rows from every sheet (each sheet is one day).
-  // Sheets 1+ have a variable-length summary section before the data,
-  // so we find where transactions start by looking for "Batch from" or "Ticket ".
-  const allRows: unknown[][] = [];
+  // Column positions vary between sheets, so we detect them from the header
+  // row (the row containing "Retail", "Perks", etc.) on each sheet.
+  interface ColMap {
+    item: number;       // SKU\nProduct\nSize
+    salesperson: number;
+    retail: number;
+    salePrice: number;
+    perks: number;
+    markdown: number;
+  }
+
+  function detectColumns(sheetRows: unknown[][]): ColMap {
+    // Default layout (Sheet 0 / single-day files)
+    const defaults: ColMap = { item: 2, salesperson: 5, retail: 12, salePrice: 13, perks: 15, markdown: 16 };
+
+    for (let i = 0; i < Math.min(sheetRows.length, 40); i++) {
+      const row = sheetRows[i];
+      if (!row) continue;
+      // Look for the header row that contains "Retail"
+      let retailCol = -1;
+      for (let c = 0; c < 30; c++) {
+        if (row[c] != null && String(row[c]).trim() === "Retail") {
+          retailCol = c;
+          break;
+        }
+      }
+      if (retailCol === -1) continue;
+
+      // Found the header row — map columns by looking for known headers
+      const map: ColMap = { ...defaults };
+      map.retail = retailCol;
+      for (let c = 0; c < 30; c++) {
+        const v = row[c] != null ? String(row[c]).trim() : "";
+        if (v === "Price") map.salePrice = c;
+        if (v === "Perks") map.perks = c;
+        if (v === "Markdown") map.markdown = c;
+        if (v === "Sold") {
+          // SKU column is typically 2 before Sold, salesperson is Sold - 1
+          // But more reliably: find them from sale rows below
+        }
+      }
+
+      // Find item and salesperson columns from the first actual sale row
+      for (let j = i + 1; j < Math.min(sheetRows.length, i + 50); j++) {
+        const saleRow = sheetRows[j];
+        if (!saleRow) continue;
+        const c0 = saleRow[0] != null ? String(saleRow[0]).trim() : "";
+        if (!SALE_TYPES.has(c0)) continue;
+        // Item column: contains newlines (SKU\nProduct\nSize)
+        for (let c = 1; c < 10; c++) {
+          if (saleRow[c] != null && String(saleRow[c]).includes("\n")) {
+            map.item = c;
+            break;
+          }
+        }
+        // Salesperson column: contains "Sales:"
+        for (let c = 1; c < 15; c++) {
+          if (saleRow[c] != null && String(saleRow[c]).trim().startsWith("Sales:")) {
+            map.salesperson = c;
+            break;
+          }
+        }
+        break;
+      }
+      return map;
+    }
+    return defaults;
+  }
+
+  // Process each sheet independently with its own column mapping
+  const CHUNK_SIZE = 50;
+  let processedRows = 0;
+
+  // First pass: count total data rows for progress reporting
+  let totalRows = 0;
+  const sheetData: { rows: unknown[][]; cols: ColMap }[] = [];
   for (const name of wb.SheetNames) {
     const sheet = wb.Sheets[name];
     const sheetRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
       header: 1,
       defval: null,
     });
-    // Find the first row that starts with "Batch from" or "Ticket " — that's where data begins
+    const cols = detectColumns(sheetRows);
+
+    // Find where transaction data starts
     let dataStart = 0;
     for (let i = 0; i < sheetRows.length; i++) {
       const c0 = sheetRows[i]?.[0];
@@ -101,11 +175,10 @@ export async function parseSalesJournal(
         break;
       }
     }
-    allRows.push(...sheetRows.slice(dataStart));
+    const dataRows = sheetRows.slice(dataStart);
+    totalRows += dataRows.length;
+    sheetData.push({ rows: dataRows, cols });
   }
-
-  const total = allRows.length;
-  const CHUNK_SIZE = 50;
 
   let currentTicket: TicketContext = {
     ticketNumber: "",
@@ -115,77 +188,84 @@ export async function parseSalesJournal(
     customerName: "",
   };
 
-  for (let i = 0; i < allRows.length; i++) {
-    if (i % CHUNK_SIZE === 0) {
-      onProgress?.(i, total);
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  for (const { rows, cols } of sheetData) {
+    for (let i = 0; i < rows.length; i++) {
+      if (processedRows % CHUNK_SIZE === 0) {
+        onProgress?.(processedRows, totalRows);
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      processedRows++;
+
+      const row = rows[i] as unknown[];
+      const col0 = row[0];
+
+      // Skip null / undefined / empty / NaN
+      if (col0 === null || col0 === undefined || col0 === "") continue;
+      if (typeof col0 === "number" && isNaN(col0)) continue;
+
+      const col0Str = String(col0).trim();
+      if (!col0Str) continue;
+
+      // Ticket header row
+      if (/^Ticket \d+/.test(col0Str)) {
+        const parsed = parseTicketHeader(col0Str);
+        if (parsed) currentTicket = parsed;
+        continue;
+      }
+
+      // Explicit skip values
+      if (SKIP_VALUES.has(col0Str)) continue;
+      if (SKIP_PREFIXES.some((p) => col0Str.startsWith(p))) continue;
+
+      // Sale row
+      if (!SALE_TYPES.has(col0Str)) continue;
+
+      const itemRaw = row[cols.item] != null ? String(row[cols.item]) : "";
+      const parts = itemRaw.split("\n");
+      const sku = parts[0]?.trim() ?? "";
+      const productName = parts[1]?.trim() ?? "";
+      const size = parts[2]?.trim() ?? "";
+
+      const salespersonRaw = row[cols.salesperson] != null ? String(row[cols.salesperson]).trim() : "";
+      const salesperson = salespersonRaw.replace(/^Sales:\s*/, "").trim();
+
+      const retailRaw = row[cols.retail];
+      const salePriceRaw = row[cols.salePrice];
+      const perksRaw = row[cols.perks];
+      const markdownRaw = row[cols.markdown];
+      const retailPrice = typeof retailRaw === "number" ? retailRaw : 0;
+      const salePrice = typeof salePriceRaw === "number" ? salePriceRaw : 0;
+      const perks = typeof perksRaw === "number" ? perksRaw : 0;
+      const markdown = typeof markdownRaw === "number" ? markdownRaw : 0;
+
+      const isOutlet = perks === 1;
+      const isPayablePerk = perks > 1;
+      const hasPerk = perks > 0;
+
+      transactions.push({
+        id: crypto.randomUUID(),
+        reportId,
+        ticketNumber: currentTicket.ticketNumber,
+        date: currentTicket.date,
+        time: currentTicket.time,
+        cashier: currentTicket.cashier,
+        customerName: currentTicket.customerName,
+        salesperson,
+        transactionType: col0Str,
+        sku,
+        productName,
+        size,
+        retailPrice,
+        salePrice,
+        perks,
+        markdown,
+        isOutlet,
+        isPayablePerk,
+        hasPerk,
+      });
     }
-
-    const row = allRows[i] as unknown[];
-    const col0 = row[0];
-
-    // Skip null / undefined / empty / NaN
-    if (col0 === null || col0 === undefined || col0 === "") continue;
-    if (typeof col0 === "number" && isNaN(col0)) continue;
-
-    const col0Str = String(col0).trim();
-    if (!col0Str) continue;
-
-    // Ticket header row
-    if (/^Ticket \d+/.test(col0Str)) {
-      const parsed = parseTicketHeader(col0Str);
-      if (parsed) currentTicket = parsed;
-      continue;
-    }
-
-    // Explicit skip values
-    if (SKIP_VALUES.has(col0Str)) continue;
-    if (SKIP_PREFIXES.some((p) => col0Str.startsWith(p))) continue;
-
-    // Sale row
-    if (!SALE_TYPES.has(col0Str)) continue;
-
-    const itemRaw = row[2] != null ? String(row[2]) : "";
-    const parts = itemRaw.split("\n");
-    const sku = parts[0]?.trim() ?? "";
-    const productName = parts[1]?.trim() ?? "";
-    const size = parts[2]?.trim() ?? "";
-
-    const salespersonRaw = row[5] != null ? String(row[5]).trim() : "";
-    const salesperson = salespersonRaw.replace(/^Sales:\s*/, "").trim();
-
-    const retailPrice = typeof row[12] === "number" ? row[12] : 0;
-    const salePrice = typeof row[13] === "number" ? row[13] : 0;
-    const perks = typeof row[15] === "number" ? row[15] : 0;
-    const markdown = typeof row[16] === "number" ? row[16] : 0;
-
-    const isOutlet = perks === 1;
-    const isPayablePerk = perks > 1;
-    const hasPerk = perks > 0;
-
-    transactions.push({
-      id: crypto.randomUUID(),
-      reportId,
-      ticketNumber: currentTicket.ticketNumber,
-      date: currentTicket.date,
-      time: currentTicket.time,
-      cashier: currentTicket.cashier,
-      customerName: currentTicket.customerName,
-      salesperson,
-      transactionType: col0Str,
-      sku,
-      productName,
-      size,
-      retailPrice,
-      salePrice,
-      perks,
-      markdown,
-      isOutlet,
-      isPayablePerk,
-      hasPerk,
-    });
   }
 
-  onProgress?.(total, total);
+  onProgress?.(totalRows, totalRows);
   return transactions;
 }
