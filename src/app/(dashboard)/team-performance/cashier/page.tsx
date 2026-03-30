@@ -7,6 +7,7 @@ import {
   useMemo,
   useCallback,
 } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   ChevronRight,
@@ -108,6 +109,7 @@ function InfoBubble({ text }: { text: string }) {
 
   const toggle = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     if (!open && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect();
       setPos({ top: r.bottom + 6, left: r.left + r.width / 2 });
@@ -124,17 +126,23 @@ function InfoBubble({ text }: { text: string }) {
       >
         ?
       </span>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-50" onClick={toggle} />
-          <div
-            className="fixed z-50 px-3 py-2 rounded bg-brand-green text-brand-cream text-[11px] font-body leading-snug w-56 text-center shadow-lg"
-            style={{ top: pos.top, left: pos.left, transform: "translateX(-50%)" }}
-          >
-            {text}
-          </div>
-        </>
-      )}
+      {open &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-[9998]" onClick={toggle} />
+            <div
+              className="fixed z-[9999] px-3 py-2 rounded bg-brand-green text-brand-cream text-[11px] font-body leading-snug w-56 text-center shadow-lg"
+              style={{
+                top: pos.top,
+                left: pos.left,
+                transform: "translateX(-50%)",
+              }}
+            >
+              {text}
+            </div>
+          </>,
+          document.body
+        )}
     </>
   );
 }
