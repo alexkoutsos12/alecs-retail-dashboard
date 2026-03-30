@@ -7,7 +7,6 @@ import {
   useMemo,
   useCallback,
 } from "react";
-import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   ChevronRight,
@@ -103,47 +102,14 @@ function saveSaved(uid: string, s: SavedState) {
 // ─── Info Bubble ─────────────────────────────────────────────────────────────
 
 function InfoBubble({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLSpanElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-
-  const toggle = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 6, left: r.left + r.width / 2 });
-    }
-    setOpen((o) => !o);
-  };
-
   return (
-    <>
-      <span
-        ref={btnRef}
-        onClick={toggle}
-        className="inline-flex items-center justify-center ml-1 w-3.5 h-3.5 rounded-full bg-brand-text/10 text-brand-text/40 text-[9px] font-bold cursor-help select-none"
-      >
-        ?
-      </span>
-      {open &&
-        createPortal(
-          <>
-            <div className="fixed inset-0 z-[9998]" onClick={toggle} />
-            <div
-              className="fixed z-[9999] px-3 py-2 rounded bg-brand-green text-brand-cream text-[11px] font-body leading-snug w-56 text-center shadow-lg"
-              style={{
-                top: pos.top,
-                left: pos.left,
-                transform: "translateX(-50%)",
-              }}
-            >
-              {text}
-            </div>
-          </>,
-          document.body
-        )}
-    </>
+    <span
+      title={text}
+      onClick={(e) => e.stopPropagation()}
+      className="inline-flex items-center justify-center ml-1 w-4 h-4 rounded-full bg-brand-text/15 text-brand-text/50 text-[10px] font-bold cursor-help select-none hover:bg-brand-text/25 transition-colors"
+    >
+      ?
+    </span>
   );
 }
 
