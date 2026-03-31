@@ -298,6 +298,9 @@ export default function ActiveIncentivesPage() {
           .print-section {
             break-inside: avoid;
           }
+          .print-gender-break {
+            break-before: page;
+          }
           table {
             font-size: 10px !important;
           }
@@ -411,8 +414,12 @@ export default function ActiveIncentivesPage() {
       )}
 
       {/* ─── Sections ─── */}
-      {sections.map(([sectionName, items]) => (
-        <div key={sectionName} className="mb-6 print-section">
+      {sections.map(([sectionName, items], idx) => {
+        const gender = sectionName.split(" — ")[0];
+        const prevGender = idx > 0 ? sections[idx - 1][0].split(" — ")[0] : null;
+        const isNewGender = prevGender !== null && gender !== prevGender;
+        return (
+        <div key={sectionName} className={`mb-6 print-section${isNewGender ? " print-gender-break" : ""}`}>
           <h2 className="font-heading text-brand-green text-lg font-bold mb-2">
             {sectionName}
           </h2>
@@ -452,7 +459,8 @@ export default function ActiveIncentivesPage() {
             </table>
           </div>
         </div>
-      ))}
+        );
+      })}
 
       {/* ─── Print footer (hidden on screen, shown in print) ─── */}
       <div className="print-only hidden" style={{ marginTop: "24px", borderTop: "1px solid #ddd", paddingTop: "8px" }}>
