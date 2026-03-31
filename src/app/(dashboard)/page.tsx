@@ -33,6 +33,7 @@ interface ModuleStats {
   dateRange: { start: string; end: string } | null;
   importDate: string | null;
   lastImportDate: string | null;
+  genderBreakdown: { mens: number; womens: number; childrens: number } | null;
 }
 
 function fmt(d: string) {
@@ -105,6 +106,7 @@ export default function HomePage() {
             uniqueCashiers: data.uniqueCashiers ?? [],
             dateRange: data.dateRange ?? null,
             importDate: data.importDate ?? null,
+            genderBreakdown: data.genderBreakdown ?? null,
             lastImportDate: data.uploadedAt
               ? data.uploadedAt.toDate().toLocaleDateString("en-US", {
                   month: "2-digit",
@@ -166,13 +168,20 @@ export default function HomePage() {
                     {mod.description}
                   </p>
                   {stats ? (
-                    <p className="text-brand-text/40 text-xs font-body mb-4">
-                      {mod.id === "perk-tracker"
-                        ? `${stats.totalOutletItems} outlet items · ${stats.totalPerkItems} perk items · Last import: ${stats.lastImportDate}`
-                        : mod.id === "perk-inventory"
-                        ? `${stats.totalSkus} active incentives · Last import: ${stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}`
-                        : `${stats.uniqueSalespeople.length} salespeople · ${stats.uniqueCashiers.length} cashiers · Last import: ${stats.dateRange ? `${fmt(stats.dateRange.start)} – ${fmt(stats.dateRange.end)}` : stats.lastImportDate}`}
-                    </p>
+                    <div className="text-brand-text/40 text-xs font-body mb-4">
+                      {mod.id === "perk-tracker" ? (
+                        <p>{stats.totalOutletItems} outlet items &middot; {stats.totalPerkItems} perk items &middot; Last import: {stats.lastImportDate}</p>
+                      ) : mod.id === "perk-inventory" ? (
+                        <>
+                          <p>{stats.totalSkus} active incentives &middot; As of {stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}</p>
+                          {stats.genderBreakdown && (
+                            <p>{stats.genderBreakdown.mens} Men&apos;s &middot; {stats.genderBreakdown.womens} Women&apos;s &middot; {stats.genderBreakdown.childrens} Children&apos;s</p>
+                          )}
+                        </>
+                      ) : (
+                        <p>{stats.uniqueSalespeople.length} salespeople &middot; {stats.uniqueCashiers.length} cashiers &middot; Last import: {stats.dateRange ? `${fmt(stats.dateRange.start)} – ${fmt(stats.dateRange.end)}` : stats.lastImportDate}</p>
+                      )}
+                    </div>
                   ) : (
                     <p className="text-brand-text/40 text-xs font-body mb-4">
                       {mod.id === "perk-inventory"

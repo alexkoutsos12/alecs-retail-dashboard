@@ -47,12 +47,7 @@ function formatSizes(sku: SkuItem): string {
 
   if (sortedWidths.length === 1) {
     const w = sortedWidths[0];
-    const sizeList = w.available.map((a) => formatSizeLabel(a.size)).join(", ");
-    // If single width and it's a standard/default, omit label
-    if (w.width === "STD" || w.width === "M" || w.width === "D") {
-      return sizeList;
-    }
-    return `${w.width}: ${sizeList}`;
+    return w.available.map((a) => formatSizeLabel(a.size)).join(", ");
   }
 
   return sortedWidths
