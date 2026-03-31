@@ -378,8 +378,8 @@ export default function ActiveIncentivesPage() {
           Print / Save as PDF
         </button>
       </div>
-      <p className="no-print text-brand-text/40 text-xs font-body mb-5">
-        As of {fmt(report.importDate)} &middot; {report.totalSkus} active SKUs
+      <p className="no-print text-brand-text/50 text-sm font-body mb-5">
+        Current perk-eligible SKUs in stock — use this as a quick reference for which styles carry an active employee incentive.
       </p>
 
       {/* ─── Filters ─── */}
