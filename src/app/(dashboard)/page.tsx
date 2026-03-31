@@ -27,9 +27,11 @@ interface ModuleStats {
   totalOutletItems: number;
   totalPerkItems: number;
   totalTransactions: number;
+  totalSkus: number;
   uniqueSalespeople: string[];
   uniqueCashiers: string[];
   dateRange: { start: string; end: string } | null;
+  importDate: string | null;
   lastImportDate: string | null;
 }
 
@@ -98,9 +100,11 @@ export default function HomePage() {
             totalOutletItems: data.totalOutletItems ?? 0,
             totalPerkItems: data.totalPerkItems ?? 0,
             totalTransactions: data.totalTransactions ?? 0,
+            totalSkus: data.totalSkus ?? 0,
             uniqueSalespeople: data.uniqueSalespeople ?? [],
             uniqueCashiers: data.uniqueCashiers ?? [],
             dateRange: data.dateRange ?? null,
+            importDate: data.importDate ?? null,
             lastImportDate: data.uploadedAt
               ? data.uploadedAt.toDate().toLocaleDateString("en-US", {
                   month: "2-digit",
@@ -165,11 +169,15 @@ export default function HomePage() {
                     <p className="text-brand-text/40 text-xs font-body mb-4">
                       {mod.id === "perk-tracker"
                         ? `${stats.totalOutletItems} outlet items · ${stats.totalPerkItems} perk items · Last import: ${stats.lastImportDate}`
+                        : mod.id === "perk-inventory"
+                        ? `${stats.totalSkus} active incentives · Last import: ${stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}`
                         : `${stats.uniqueSalespeople.length} salespeople · ${stats.uniqueCashiers.length} cashiers · Last import: ${stats.dateRange ? `${fmt(stats.dateRange.start)} – ${fmt(stats.dateRange.end)}` : stats.lastImportDate}`}
                     </p>
                   ) : (
                     <p className="text-brand-text/40 text-xs font-body mb-4">
-                      No data yet — import your first file
+                      {mod.id === "perk-inventory"
+                        ? "No perk inventory imported yet."
+                        : "No data yet — import your first file"}
                     </p>
                   )}
                   <div className="flex flex-wrap gap-2">

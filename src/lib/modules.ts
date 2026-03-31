@@ -69,4 +69,26 @@ export const appModules: AppModule[] = [
       { label: "Cashier →", href: "/team-performance/cashier" },
     ],
   },
+  {
+    id: "perk-inventory",
+    name: "Perk Inventory",
+    description:
+      "Current payable perk SKUs organized by gender and category — printable staff reference.",
+    firestoreModule: "perk-inventory",
+    navItems: [
+      {
+        label: "Active Incentives",
+        href: "/perk-inventory/active-incentives",
+        icon: "Tag",
+      },
+      { label: "Import", href: "/perk-inventory/import", icon: "Upload" },
+    ],
+    importRoute: "/perk-inventory/import",
+    reportRoutes: [
+      {
+        label: "Active Incentives →",
+        href: "/perk-inventory/active-incentives",
+      },
+    ],
+  },
 ];

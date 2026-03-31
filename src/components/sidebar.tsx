@@ -13,6 +13,7 @@ import {
   Gift,
   Users,
   BarChart3,
+  Tag,
   Settings,
   LogOut,
   X,
@@ -26,6 +27,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Gift,
   Users,
   BarChart3,
+  Tag,
 };
 
 interface SidebarProps {
