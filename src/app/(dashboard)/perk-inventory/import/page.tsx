@@ -461,11 +461,13 @@ export default function PerkInventoryImportPage() {
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                 <p className="font-body text-sm text-amber-700 font-medium">
                   Warning: {successData.excludedDollarOneSkus.length} SKU(s)
-                  excluded — $1 outlet perk
+                  excluded — $1 perk without Outlet keyword
                 </p>
               </div>
               <p className="font-body text-xs text-amber-600">
-                This may indicate a RICS data entry error:{" "}
+                These SKUs have a $1 perk but are not coded with the
+                &ldquo;Outlet&rdquo; keyword in RICS. They were likely meant to
+                be outlet items and may need the keyword added:{" "}
                 {successData.excludedDollarOneSkus.join(", ")}
               </p>
             </div>
