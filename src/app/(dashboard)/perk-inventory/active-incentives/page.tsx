@@ -167,19 +167,31 @@ export default function ActiveIncentivesPage() {
       items = items.filter((s) => s.gender === genderFilter);
     }
     if (categoryFilter !== "All") {
-      items = items.filter((s) => s.mainCategory === categoryFilter);
+      if (genderFilter !== "All") {
+        // Category is just the mainCategory name
+        items = items.filter((s) => s.mainCategory === categoryFilter);
+      } else {
+        // Category is "Gender MainCategory" compound key
+        items = items.filter(
+          (s) => `${s.gender} ${s.mainCategory}` === categoryFilter
+        );
+      }
     }
     return items;
   }, [skus, genderFilter, categoryFilter]);
 
   // Categories available for current gender filter
+  // When gender is "All", prefix with gender to disambiguate (e.g. "Men's Athletic")
   const availableCategories = useMemo(() => {
     const base =
       genderFilter !== "All"
         ? skus.filter((s) => s.gender === genderFilter)
         : skus;
-    const cats = [...new Set(base.map((s) => s.mainCategory))].sort();
-    return cats;
+    if (genderFilter !== "All") {
+      return [...new Set(base.map((s) => s.mainCategory))].sort();
+    }
+    // "All" gender — prefix with gender name
+    return [...new Set(base.map((s) => `${s.gender} ${s.mainCategory}`))].sort();
   }, [skus, genderFilter]);
 
   // Reset category when gender changes and category no longer available
