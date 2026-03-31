@@ -153,8 +153,9 @@ export default function SettingsPage() {
     try {
       const snap = await getDocs(collection(db, "allowedEmails"));
       setAllowedEmails(snap.docs.map((d) => d.id).sort());
-    } catch {
-      setEmailsError("Failed to load allowed emails.");
+    } catch (err) {
+      console.error("fetchAllowedEmails error:", err);
+      setEmailsError("Failed to load allowed emails. Check Firestore rules — the allowedEmails collection may need read/write access for authenticated users.");
     } finally {
       setLoadingEmails(false);
     }
@@ -198,8 +199,8 @@ export default function SettingsPage() {
     if (userData?.role === "admin") {
       fetchUsers();
       fetchReports();
-      fetchAllowedEmails();
     }
+    fetchAllowedEmails();
   }, [userData?.role, fetchUsers, fetchReports, fetchAllowedEmails]);
 
   const handleRoleChange = async (
@@ -413,8 +414,9 @@ export default function SettingsPage() {
           Allowed Emails
         </h2>
         <p className="font-body text-sm text-brand-text/50 mb-3">
-          Only Google accounts matching these emails can log in. Existing users
-          are always allowed regardless of this list.
+          Only accounts matching these emails can sign in (Google or
+          email/password). Existing users are always allowed regardless of this
+          list.
         </p>
 
         {/* Add email input */}
