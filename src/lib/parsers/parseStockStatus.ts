@@ -161,12 +161,15 @@ export function parseStockStatus(
       const row = rows[r];
       if (!row) continue;
 
-      const widthVal = row[COL_WIDTH];
-      if (widthVal == null || String(widthVal).trim() === "") continue;
-      const widthStr = String(widthVal).trim();
-
       // Skip if this looks like a new SKU header (has col[0] data)
       if (row[COL_SKU] != null && String(row[COL_SKU]).trim() !== "") break;
+
+      // Width may be empty for single-width SKUs (e.g. children's)
+      const widthVal = row[COL_WIDTH];
+      const widthStr =
+        widthVal != null && String(widthVal).trim() !== ""
+          ? String(widthVal).trim()
+          : "STD";
 
       const available: SkuSize[] = [];
       for (const sc of sizeColumns) {
