@@ -186,10 +186,21 @@ export default function SettingsPage() {
 
   const handleRemoveEmail = async (email: string) => {
     try {
+      // Remove from allowedEmails
       await deleteDoc(doc(db, "allowedEmails", email));
+
+      // Also remove matching user doc so they lose access
+      const matchingUser = users.find(
+        (u) => u.email.toLowerCase() === email.toLowerCase()
+      );
+      if (matchingUser) {
+        await deleteDoc(doc(db, "users", matchingUser.uid));
+        setUsers((prev) => prev.filter((u) => u.uid !== matchingUser.uid));
+      }
+
       setAllowedEmails((prev) => prev.filter((e) => e !== email));
       setRemoveEmailDialog(null);
-      toast.success("Email removed.");
+      toast.success("Email removed and access revoked.");
     } catch {
       toast.error("Failed to remove email.");
     }
@@ -276,8 +287,9 @@ export default function SettingsPage() {
               Remove Email
             </h2>
             <p className="font-body text-sm text-brand-text/70 mb-5">
-              Remove <strong>{removeEmailDialog}</strong> from the allowed list?
-              They won&apos;t be able to log in unless re-added.
+              Remove <strong>{removeEmailDialog}</strong>? This will revoke
+              their access and remove them from user management. They
+              won&apos;t be able to sign in unless re-added.
             </p>
             <div className="flex gap-3 justify-end">
               <button
