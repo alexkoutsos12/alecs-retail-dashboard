@@ -9,7 +9,7 @@ import {
   ChangeEvent,
 } from "react";
 import Link from "next/link";
-import { Upload, CheckCircle, AlertCircle, AlertTriangle } from "lucide-react";
+import { Upload, CheckCircle, AlertCircle, AlertTriangle, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { db, storage } from "@/lib/firebase";
 import {
@@ -83,6 +83,7 @@ export default function PerkInventoryImportPage() {
 
   const [currentImport, setCurrentImport] = useState<ReportDoc | null>(null);
   const [loadingImport, setLoadingImport] = useState(true);
+  const [deleteDialog, setDeleteDialog] = useState(false);
 
   const fetchCurrentImport = useCallback(async () => {
     setLoadingImport(true);
@@ -112,6 +113,23 @@ export default function PerkInventoryImportPage() {
   useEffect(() => {
     fetchCurrentImport();
   }, [fetchCurrentImport]);
+
+  const handleDelete = async () => {
+    if (!currentImport) return;
+    try {
+      try {
+        await deleteObject(storageRef(storage, currentImport.storagePath));
+      } catch {
+        // File may not exist in Storage
+      }
+      await deleteDoc(doc(db, "reports", currentImport.id));
+      setDeleteDialog(false);
+      toast.success("Import deleted.");
+      fetchCurrentImport();
+    } catch {
+      toast.error("Failed to delete import.");
+    }
+  };
 
   useEffect(() => {
     document.title = "Import · Perk Inventory";
@@ -258,6 +276,35 @@ export default function PerkInventoryImportPage() {
 
   return (
     <div>
+      {/* Delete confirmation dialog */}
+      {deleteDialog && currentImport && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full shadow-xl">
+            <h2 className="font-heading text-brand-green text-lg font-bold mb-2">
+              Delete Import
+            </h2>
+            <p className="font-body text-sm text-brand-text/70 mb-5">
+              Delete <strong>{currentImport.filename}</strong>? This will remove
+              all perk inventory data. This cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setDeleteDialog(false)}
+                className="px-4 py-2 rounded font-body text-sm text-brand-text/70 border border-brand-cream-dark hover:bg-brand-cream transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                className="px-4 py-2 rounded font-body text-sm bg-red-600 text-white hover:bg-red-700 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <h1 className="font-heading text-brand-green text-2xl font-bold mb-1">
         Import — Perk Inventory
       </h1>
@@ -479,6 +526,7 @@ export default function PerkInventoryImportPage() {
                   <th className="px-4 py-2 font-normal">SKUs</th>
                   <th className="px-4 py-2 font-normal">Uploaded By</th>
                   <th className="px-4 py-2 font-normal">Uploaded At</th>
+                  <th className="px-4 py-2 font-normal w-8"></th>
                 </tr>
               </thead>
               <tbody>
@@ -495,6 +543,15 @@ export default function PerkInventoryImportPage() {
                     {currentImport.uploadedAt
                       ? currentImport.uploadedAt.toDate().toLocaleDateString()
                       : "\u2014"}
+                  </td>
+                  <td className="px-4 py-2">
+                    <button
+                      onClick={() => setDeleteDialog(true)}
+                      className="text-brand-text/30 hover:text-red-500 transition-colors"
+                      title="Delete import"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </td>
                 </tr>
               </tbody>
