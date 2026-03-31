@@ -262,7 +262,7 @@ export default function PerkInventoryImportPage() {
         Import — Perk Inventory
       </h1>
       <p className="text-brand-text/50 font-body text-sm mb-6">
-        Upload a RICS Stock Status (.xlsx)
+        Upload a RICS Stock Status report (.xlsx)
       </p>
 
       {/* IDLE — upload zone */}
@@ -306,7 +306,33 @@ export default function PerkInventoryImportPage() {
               </p>
             )}
           </div>
-          <div className="mt-4 flex justify-end">
+
+          {/* RICS setup instructions */}
+          <div className="mt-4 mb-4 bg-brand-cream/60 rounded p-4">
+            <p className="font-body text-xs font-semibold text-brand-text/60 mb-2">
+              RICS Report Setup
+            </p>
+            <p className="font-body text-xs text-brand-text/50 mb-1">
+              Run a <strong>Stock Status</strong> report with these options:
+            </p>
+            <ul className="font-body text-xs text-brand-text/50 list-disc pl-5 space-y-0.5">
+              <li>
+                <strong>Pricing:</strong> Include Only SKUs With Perks (as of
+                today)
+              </li>
+              <li>
+                <strong>Custom Entries:</strong> Exclude keyword{" "}
+                <span className="font-mono bg-white/60 px-1 rounded">
+                  OUTLET
+                </span>
+              </li>
+              <li>
+                <strong>Also Print:</strong> Perks
+              </li>
+            </ul>
+          </div>
+
+          <div className="flex justify-end">
             <button
               onClick={handleImport}
               disabled={!selectedFile}
