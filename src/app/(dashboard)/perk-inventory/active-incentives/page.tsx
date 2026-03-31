@@ -462,6 +462,26 @@ export default function ActiveIncentivesPage() {
         );
       })}
 
+      {/* ─── Total perk liability (screen only) ─── */}
+      {filtered.length > 0 && (
+        <div className="no-print bg-white border-l-[3px] border-brand-green rounded p-5 mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <p className="font-heading text-brand-green text-base font-bold">
+                Total Perk Liability
+              </p>
+              <p className="font-body text-xs text-brand-text/40">
+                {filtered.length} SKU{filtered.length !== 1 ? "s" : ""} &middot;{" "}
+                {filtered.reduce((s, sku) => s + sku.totalOnHand, 0).toLocaleString()} units on hand
+              </p>
+            </div>
+            <p className="font-heading text-brand-green text-2xl font-bold">
+              ${filtered.reduce((s, sku) => s + sku.perk * sku.totalOnHand, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ─── Print footer (hidden on screen, shown in print) ─── */}
       <div className="print-only hidden" style={{ marginTop: "24px", borderTop: "1px solid #ddd", paddingTop: "8px" }}>
         <p style={{ fontSize: "9px", color: "#999", textAlign: "center" }}>
