@@ -311,7 +311,6 @@ export default function PerkPayoutPage() {
         setPendingPerkAmounts(fpa.length > 0 ? fpa : defaultPayable);
 
         setDataLoaded(true);
-        setSelectorCollapsed(true);
       } catch (err) {
         setDataError(
           err instanceof Error ? err.message : "Failed to load report data."
@@ -504,6 +503,7 @@ export default function PerkPayoutPage() {
         loadingData={loadingData}
         collapsed={selectorCollapsed}
         onExpand={() => setSelectorCollapsed(false)}
+        onCollapse={() => setSelectorCollapsed(true)}
       />
 
       {/* No imports */}

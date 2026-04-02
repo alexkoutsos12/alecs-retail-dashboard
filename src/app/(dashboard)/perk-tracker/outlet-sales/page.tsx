@@ -294,7 +294,6 @@ export default function OutletSalesPage() {
         setPendingViewMode(fvm);
 
         setDataLoaded(true);
-        setSelectorCollapsed(true);
       } catch (err) {
         setDataError(
           err instanceof Error ? err.message : "Failed to load report data."
@@ -465,6 +464,7 @@ export default function OutletSalesPage() {
         loadingData={loadingData}
         collapsed={selectorCollapsed}
         onExpand={() => setSelectorCollapsed(false)}
+        onCollapse={() => setSelectorCollapsed(true)}
       />
 
       {/* No imports state */}

@@ -443,7 +443,6 @@ export default function CashierPage() {
         setFilterDays(fd);
 
         setDataLoaded(true);
-        setSelectorCollapsed(true);
       } catch (err) {
         setDataError(
           err instanceof Error ? err.message : "Failed to load report data."
@@ -648,6 +647,7 @@ export default function CashierPage() {
         loadingData={loadingData}
         collapsed={selectorCollapsed}
         onExpand={() => setSelectorCollapsed(false)}
+        onCollapse={() => setSelectorCollapsed(true)}
       />
 
       {/* No imports state */}

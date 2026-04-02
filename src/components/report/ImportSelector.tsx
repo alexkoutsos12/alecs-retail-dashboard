@@ -17,6 +17,7 @@ interface Props {
   loadingData: boolean;
   collapsed: boolean;
   onExpand: () => void;
+  onCollapse?: () => void;
 }
 
 function fmtShort(d: string): string {
@@ -38,6 +39,7 @@ export default function ImportSelector({
   loadingData,
   collapsed,
   onExpand,
+  onCollapse,
 }: Props) {
   if (collapsed) {
     const names = reports
@@ -84,9 +86,19 @@ export default function ImportSelector({
 
   return (
     <div className="bg-white border-l-[3px] border-brand-green rounded p-4 mb-6 print:hidden">
-      <p className="font-body text-[10px] uppercase tracking-wider text-brand-text/40 mb-3">
-        Data source
-      </p>
+      <div className="flex items-center justify-between mb-3">
+        <p className="font-body text-[10px] uppercase tracking-wider text-brand-text/40">
+          Data source
+        </p>
+        {onCollapse && (
+          <button
+            onClick={onCollapse}
+            className="font-body text-xs text-brand-text/40 hover:text-brand-text/60 transition-colors"
+          >
+            Collapse ▲
+          </button>
+        )}
+      </div>
 
       {loadingReports ? (
         <div className="space-y-2 mb-4">

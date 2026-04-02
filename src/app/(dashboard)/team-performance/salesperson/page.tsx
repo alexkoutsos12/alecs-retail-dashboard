@@ -523,7 +523,6 @@ export default function SalespersonPage() {
         setFilterDays(fd);
 
         setDataLoaded(true);
-        setSelectorCollapsed(true);
       } catch (err) {
         setDataError(
           err instanceof Error ? err.message : "Failed to load report data."
@@ -710,6 +709,7 @@ export default function SalespersonPage() {
         loadingData={loadingData}
         collapsed={selectorCollapsed}
         onExpand={() => setSelectorCollapsed(false)}
+        onCollapse={() => setSelectorCollapsed(true)}
       />
 
       {/* No imports state */}
