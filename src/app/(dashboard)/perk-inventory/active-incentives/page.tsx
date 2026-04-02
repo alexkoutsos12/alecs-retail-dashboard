@@ -32,7 +32,13 @@ function fmt(d: string) {
   return `${m}/${day}/${y}`;
 }
 
-/** Compact sizes string: "D: 9, 10, 11 · W: 8.5, 9" or just "9, 10, 11" for single width */
+/** Format a single size entry — shows qty in parentheses when > 1 */
+function formatSizeEntry(a: { size: string; qty: number }): string {
+  const label = formatSizeLabel(a.size);
+  return a.qty > 1 ? `${label}(${a.qty})` : label;
+}
+
+/** Compact sizes string with quantities: "D: 9, 10(2), 11 · W: 8.5, 9" */
 function formatSizes(sku: SkuItem): string {
   const widths = sku.sizes.filter((w) => w.available.length > 0);
   if (widths.length === 0) return "—";
@@ -47,14 +53,12 @@ function formatSizes(sku: SkuItem): string {
 
   if (sortedWidths.length === 1) {
     const w = sortedWidths[0];
-    return w.available.map((a) => formatSizeLabel(a.size)).join(", ");
+    return w.available.map(formatSizeEntry).join(", ");
   }
 
   return sortedWidths
     .map((w) => {
-      const sizeList = w.available
-        .map((a) => formatSizeLabel(a.size))
-        .join(", ");
+      const sizeList = w.available.map(formatSizeEntry).join(", ");
       return `${w.width}: ${sizeList}`;
     })
     .join(" \u00B7 ");
@@ -450,6 +454,7 @@ export default function ActiveIncentivesPage() {
                   <th className="px-4 py-2 font-normal">Color</th>
                   <th className="px-4 py-2 font-normal">Supplier</th>
                   <th className="px-4 py-2 font-normal">Perk $</th>
+                  <th className="px-4 py-2 font-normal">On Hand</th>
                   <th className="px-4 py-2 font-normal">Sizes</th>
                 </tr>
               </thead>
@@ -467,6 +472,9 @@ export default function ActiveIncentivesPage() {
                     <td className="px-4 py-2">{sku.supplier}</td>
                     <td className="px-4 py-2 font-semibold text-brand-green">
                       ${sku.perk}
+                    </td>
+                    <td className="px-4 py-2 text-brand-text/50">
+                      {sku.totalOnHand}
                     </td>
                     <td className="px-4 py-2 text-xs text-brand-text/70">
                       {formatSizes(sku)}
