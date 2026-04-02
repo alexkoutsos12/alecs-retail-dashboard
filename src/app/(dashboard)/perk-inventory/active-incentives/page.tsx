@@ -310,6 +310,12 @@ export default function ActiveIncentivesPage() {
           .print-section {
             break-inside: avoid;
           }
+          .print-section .overflow-x-auto {
+            overflow: visible !important;
+          }
+          .print-section table {
+            min-width: 0 !important;
+          }
           .print-gender-break {
             break-before: page;
           }
