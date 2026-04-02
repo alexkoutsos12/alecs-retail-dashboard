@@ -311,9 +311,6 @@ export default function ActiveIncentivesPage() {
           .print-only {
             display: block !important;
           }
-          .print-section {
-            break-inside: avoid;
-          }
           .print-section .overflow-x-auto {
             overflow: visible !important;
           }
