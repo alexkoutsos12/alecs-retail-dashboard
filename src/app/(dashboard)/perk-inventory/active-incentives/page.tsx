@@ -106,9 +106,10 @@ export default function ActiveIncentivesPage() {
   const [report, setReport] = useState<ReportMeta | null>(null);
   const [skus, setSkus] = useState<SkuItem[]>([]);
 
-  // Filters
+  // Filters. `categoryFilters` is a set of selected category values —
+  // empty set means "all categories".
   const [genderFilter, setGenderFilter] = useState<string>("All");
-  const [categoryFilter, setCategoryFilter] = useState<string>("All");
+  const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
 
   useEffect(() => {
     document.title = "Active Incentives · Perk Inventory";
@@ -170,19 +171,20 @@ export default function ActiveIncentivesPage() {
     if (genderFilter !== "All") {
       items = items.filter((s) => s.gender === genderFilter);
     }
-    if (categoryFilter !== "All") {
+    if (categoryFilters.length > 0) {
+      const set = new Set(categoryFilters);
       if (genderFilter !== "All") {
-        // Category is just the mainCategory name
-        items = items.filter((s) => s.mainCategory === categoryFilter);
+        // Category key is just the mainCategory name.
+        items = items.filter((s) => set.has(s.mainCategory));
       } else {
-        // Category is "Gender MainCategory" compound key
-        items = items.filter(
-          (s) => `${s.gender} ${s.mainCategory}` === categoryFilter
+        // Category key is "Gender MainCategory" compound.
+        items = items.filter((s) =>
+          set.has(`${s.gender} ${s.mainCategory}`)
         );
       }
     }
     return items;
-  }, [skus, genderFilter, categoryFilter]);
+  }, [skus, genderFilter, categoryFilters]);
 
   // Categories available for current gender filter
   // When gender is "All", prefix with gender to disambiguate (e.g. "Men's Athletic")
@@ -198,12 +200,15 @@ export default function ActiveIncentivesPage() {
     return [...new Set(base.map((s) => `${s.gender} ${s.mainCategory}`))].sort();
   }, [skus, genderFilter]);
 
-  // Reset category when gender changes and category no longer available
+  // Drop selected categories that are no longer available after a gender
+  // change (e.g. switching from Men's to Women's makes "Athletic" a
+  // different key, since categories are prefixed with gender under "All").
   useEffect(() => {
-    if (categoryFilter !== "All" && !availableCategories.includes(categoryFilter)) {
-      setCategoryFilter("All");
-    }
-  }, [availableCategories, categoryFilter]);
+    setCategoryFilters((prev) => {
+      const next = prev.filter((c) => availableCategories.includes(c));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [availableCategories]);
 
   // Group by gender → category, sorted by perk descending within each
   const sections = useMemo(() => {
@@ -390,37 +395,59 @@ export default function ActiveIncentivesPage() {
       </p>
 
       {/* ─── Filters ─── */}
-      <div className="no-print flex flex-col sm:flex-row gap-3 mb-6">
+      <div className="no-print flex flex-col gap-3 mb-6">
         {/* Gender tabs */}
-        <div className="flex gap-1 bg-brand-cream rounded p-0.5">
-          {GENDERS.map((g) => (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex gap-1 bg-brand-cream rounded p-0.5">
+            {GENDERS.map((g) => (
+              <button
+                key={g}
+                onClick={() => setGenderFilter(g)}
+                className={`px-3 py-1.5 rounded font-body text-xs transition-colors ${
+                  genderFilter === g
+                    ? "bg-brand-green text-brand-cream"
+                    : "text-brand-text/50 hover:text-brand-text"
+                }`}
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+          {categoryFilters.length > 0 && (
             <button
-              key={g}
-              onClick={() => setGenderFilter(g)}
-              className={`px-3 py-1.5 rounded font-body text-xs transition-colors ${
-                genderFilter === g
-                  ? "bg-brand-green text-brand-cream"
-                  : "text-brand-text/50 hover:text-brand-text"
-              }`}
+              onClick={() => setCategoryFilters([])}
+              className="font-body text-xs text-brand-green hover:underline"
             >
-              {g}
+              Clear categories ({categoryFilters.length})
             </button>
-          ))}
+          )}
         </div>
 
-        {/* Category dropdown */}
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          className="font-body text-sm border border-brand-cream-dark rounded px-3 py-1.5 bg-white focus:outline-none focus:border-brand-green"
-        >
-          <option value="All">All Categories</option>
-          {availableCategories.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
+        {/* Category chips — toggle any combination */}
+        <div className="flex flex-wrap gap-1.5">
+          {availableCategories.map((c) => {
+            const active = categoryFilters.includes(c);
+            return (
+              <button
+                key={c}
+                onClick={() =>
+                  setCategoryFilters((prev) =>
+                    prev.includes(c)
+                      ? prev.filter((x) => x !== c)
+                      : [...prev, c]
+                  )
+                }
+                className={`font-body text-xs px-3 py-1 rounded-full border transition-colors ${
+                  active
+                    ? "bg-brand-green text-brand-cream border-brand-green"
+                    : "bg-white text-brand-text/60 border-brand-cream-dark hover:border-brand-green"
+                }`}
+              >
+                {c}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* ─── No results ─── */}
