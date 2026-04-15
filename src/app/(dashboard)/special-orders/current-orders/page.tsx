@@ -28,6 +28,8 @@ interface ReportMeta {
   storagePath: string;
 }
 
+type SortMode = "first-name" | "last-name" | "date-oldest" | "date-newest";
+
 // ─── Helpers ────────────────────────────────────────────────────
 
 function fmt(d: string) {
@@ -51,6 +53,29 @@ function formatSize(raw: string): string {
     return decimal > 0 ? `${whole}.${decimal}` : String(whole);
   }
   return raw;
+}
+
+/** Last token of a name — "Pete And Tracey Levesque" -> "Levesque". */
+function lastName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return parts[parts.length - 1] || name;
+}
+
+/** Earliest order date in outstanding list, for date-sort. */
+function earliestDate(c: SpecialOrderCustomer): string {
+  let best = "";
+  for (const o of c.outstanding) {
+    if (o.date && (!best || o.date < best)) best = o.date;
+  }
+  return best;
+}
+
+function latestDate(c: SpecialOrderCustomer): string {
+  let best = "";
+  for (const o of c.outstanding) {
+    if (o.date && o.date > best) best = o.date;
+  }
+  return best;
 }
 
 // ─── Skeleton ───────────────────────────────────────────────────
@@ -80,6 +105,7 @@ export default function CurrentSpecialOrdersPage() {
   const [report, setReport] = useState<ReportMeta | null>(null);
   const [customers, setCustomers] = useState<SpecialOrderCustomer[]>([]);
   const [search, setSearch] = useState("");
+  const [sortMode, setSortMode] = useState<SortMode>("last-name");
 
   useEffect(() => {
     document.title = "Current Orders · Special Orders";
@@ -120,9 +146,6 @@ export default function CurrentSpecialOrdersPage() {
       );
       if (!res.ok) throw new Error("Failed to download special orders data.");
       const json: SpecialOrderCustomer[] = await res.json();
-      // Parser already sorts alphabetically, but enforce here in case the
-      // stored JSON ever arrives in a different order.
-      json.sort((a, b) => a.name.localeCompare(b.name));
       setCustomers(json);
     } catch (err) {
       setError(
@@ -139,23 +162,63 @@ export default function CurrentSpecialOrdersPage() {
     fetchData();
   }, [fetchData]);
 
-  const filtered = useMemo(() => {
+  // Filter by search, then sort by selected mode.
+  const sortedFiltered = useMemo(() => {
     const s = search.trim().toLowerCase();
-    if (!s) return customers;
-    return customers.filter((c) => {
-      if (c.name.toLowerCase().includes(s)) return true;
-      if (c.accountNumber.toLowerCase().includes(s)) return true;
-      return c.outstanding.some(
-        (o) =>
-          o.sku.toLowerCase().includes(s) ||
-          o.ticket.toLowerCase().includes(s)
-      );
-    });
-  }, [customers, search]);
+    let list = customers;
+    if (s) {
+      list = list.filter((c) => {
+        if (c.name.toLowerCase().includes(s)) return true;
+        if (c.accountNumber.toLowerCase().includes(s)) return true;
+        if (c.phone.replace(/\D/g, "").includes(s.replace(/\D/g, ""))) {
+          // phone-digit match (only when user typed at least one digit)
+          if (/\d/.test(s)) return true;
+        }
+        return c.outstanding.some(
+          (o) =>
+            o.sku.toLowerCase().includes(s) ||
+            o.ticket.toLowerCase().includes(s)
+        );
+      });
+    }
+    const copy = [...list];
+    switch (sortMode) {
+      case "first-name":
+        copy.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case "last-name":
+        copy.sort((a, b) =>
+          lastName(a.name).localeCompare(lastName(b.name)) ||
+          a.name.localeCompare(b.name)
+        );
+        break;
+      case "date-oldest":
+        copy.sort((a, b) => {
+          const da = earliestDate(a);
+          const db_ = earliestDate(b);
+          if (!da && !db_) return 0;
+          if (!da) return 1;
+          if (!db_) return -1;
+          return da.localeCompare(db_);
+        });
+        break;
+      case "date-newest":
+        copy.sort((a, b) => {
+          const da = latestDate(a);
+          const db_ = latestDate(b);
+          if (!da && !db_) return 0;
+          if (!da) return 1;
+          if (!db_) return -1;
+          return db_.localeCompare(da);
+        });
+        break;
+    }
+    return copy;
+  }, [customers, search, sortMode]);
 
   const filteredOutstanding = useMemo(
-    () => filtered.reduce((sum, c) => sum + c.outstanding.length, 0),
-    [filtered]
+    () => sortedFiltered.reduce((sum, c) => sum + c.outstanding.length, 0),
+    [sortedFiltered]
   );
 
   // ─── Render ─────────────────────────────────────────────────
@@ -240,7 +303,6 @@ export default function CurrentSpecialOrdersPage() {
           .print-only {
             display: block !important;
           }
-          /* Keep each customer card intact on one page */
           .customer-card {
             break-inside: avoid;
             page-break-inside: avoid;
@@ -248,14 +310,14 @@ export default function CurrentSpecialOrdersPage() {
             border-left: 1px solid #999 !important;
             border-radius: 0 !important;
             box-shadow: none !important;
-            margin-bottom: 8px !important;
-            padding: 6px 10px !important;
+            margin-bottom: 6px !important;
+            padding: 5px 8px !important;
             background: white !important;
           }
           .customer-card h2 {
             color: black !important;
             font-size: 11pt !important;
-            margin-bottom: 4px !important;
+            margin-bottom: 3px !important;
           }
           .customer-card table {
             font-size: 9.5pt !important;
@@ -268,7 +330,6 @@ export default function CurrentSpecialOrdersPage() {
           }
           .print-special {
             font-weight: 600 !important;
-            /* Use an outline rather than a filled background to survive B&W */
             border: 1px solid #000 !important;
             padding: 0 3px !important;
             border-radius: 2px !important;
@@ -322,9 +383,9 @@ export default function CurrentSpecialOrdersPage() {
         </h1>
         <button
           onClick={() => window.print()}
-          disabled={filtered.length === 0}
+          disabled={sortedFiltered.length === 0}
           title={
-            filtered.length === 0
+            sortedFiltered.length === 0
               ? "Nothing to print"
               : "Print / Save as PDF"
           }
@@ -341,20 +402,32 @@ export default function CurrentSpecialOrdersPage() {
         {fmt(report.importDate)}.
       </p>
 
-      {/* ─── Search ─── */}
-      <div className="no-print mb-5 relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-text/40" />
-        <input
-          type="text"
-          placeholder="Search customer, SKU, or ticket..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full font-body text-sm border border-brand-cream-dark rounded pl-9 pr-3 py-1.5 bg-white focus:outline-none focus:border-brand-green"
-        />
+      {/* ─── Search + Sort ─── */}
+      <div className="no-print flex flex-col sm:flex-row gap-3 mb-5">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-text/40" />
+          <input
+            type="text"
+            placeholder="Search customer, phone, SKU, or ticket..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full font-body text-sm border border-brand-cream-dark rounded pl-9 pr-3 py-1.5 bg-white focus:outline-none focus:border-brand-green"
+          />
+        </div>
+        <select
+          value={sortMode}
+          onChange={(e) => setSortMode(e.target.value as SortMode)}
+          className="font-body text-sm border border-brand-cream-dark rounded px-3 py-1.5 bg-white focus:outline-none focus:border-brand-green"
+        >
+          <option value="last-name">Sort: Last name A–Z</option>
+          <option value="first-name">Sort: First name A–Z</option>
+          <option value="date-oldest">Sort: Oldest order first</option>
+          <option value="date-newest">Sort: Newest order first</option>
+        </select>
       </div>
 
-      {/* ─── No results ─── */}
-      {filtered.length === 0 ? (
+      {/* ─── Cards ─── */}
+      {sortedFiltered.length === 0 ? (
         <div className="bg-white border-l-[3px] border-brand-green rounded p-10 text-center">
           <p className="font-body text-sm text-brand-text/50">
             No customers match your search.
@@ -362,16 +435,16 @@ export default function CurrentSpecialOrdersPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((c) => (
+          {sortedFiltered.map((c) => (
             <CustomerCard key={c.accountNumber} customer={c} />
           ))}
         </div>
       )}
 
       {/* ─── Screen-only footer summary ─── */}
-      {filtered.length > 0 && search && (
+      {sortedFiltered.length > 0 && search && (
         <div className="no-print mt-4 text-brand-text/50 font-body text-xs">
-          Showing {filtered.length} of {customers.length} customers ·{" "}
+          Showing {sortedFiltered.length} of {customers.length} customers ·{" "}
           {filteredOutstanding} outstanding item
           {filteredOutstanding === 1 ? "" : "s"}
         </div>
@@ -381,61 +454,80 @@ export default function CurrentSpecialOrdersPage() {
 }
 
 // ─── Customer card ──────────────────────────────────────────────
+//
+// Every card uses the same fixed-width <colgroup>, so SKU / Size / Width /
+// Ordered / Ticket columns align vertically across customers (answers the
+// "alignment isn't consistent person-to-person" feedback).
+// ────────────────────────────────────────────────────────────────
 
 function CustomerCard({ customer }: { customer: SpecialOrderCustomer }) {
   return (
     <div className="customer-card bg-white border-l-[3px] border-brand-green rounded p-4">
-      <div className="flex items-baseline justify-between gap-3 mb-2">
+      <div className="flex items-baseline flex-wrap gap-x-3 gap-y-1 mb-2">
         <h2 className="font-heading text-brand-green text-base font-bold leading-tight">
           {customer.name}
         </h2>
-        <span className="font-body text-xs text-brand-text/40 whitespace-nowrap font-mono">
+        {customer.phone && (
+          <span className="font-body text-sm text-brand-text/70 font-mono">
+            {customer.phone}
+          </span>
+        )}
+        <span className="font-body text-xs text-brand-text/40 font-mono ml-auto">
           #{customer.accountNumber}
         </span>
       </div>
-      <table className="w-full text-sm font-body">
-        <thead>
-          <tr className="border-b border-brand-cream-dark text-left text-brand-text/50 text-xs">
-            <th className="py-1 pr-3 font-normal">SKU</th>
-            <th className="py-1 pr-3 font-normal">Size</th>
-            <th className="py-1 pr-3 font-normal">Width</th>
-            <th className="py-1 pr-3 font-normal">Ordered</th>
-            <th className="py-1 pr-0 font-normal">Ticket</th>
-          </tr>
-        </thead>
-        <tbody>
-          {customer.outstanding.map((o: OutstandingItem, idx) => (
-            <tr
-              key={idx}
-              className="border-b border-brand-cream last:border-0"
-            >
-              <td className="py-1 pr-3 font-mono text-xs whitespace-nowrap">
-                {o.sku === "SPECIAL" ? (
-                  <span className="print-special inline-block bg-amber-100 text-amber-800 font-semibold uppercase tracking-wide text-[10px] px-1.5 py-0.5 rounded">
-                    Special (custom)
-                  </span>
-                ) : (
-                  o.sku
-                )}
-              </td>
-              <td className="py-1 pr-3 whitespace-nowrap">
-                {formatSize(o.size) || (
-                  <span className="text-brand-text/30">—</span>
-                )}
-              </td>
-              <td className="py-1 pr-3 whitespace-nowrap">
-                {o.width || <span className="text-brand-text/30">—</span>}
-              </td>
-              <td className="py-1 pr-3 whitespace-nowrap text-brand-text/60">
-                {fmtOrderDate(o.date)}
-              </td>
-              <td className="py-1 pr-0 whitespace-nowrap font-mono text-xs text-brand-text/60">
-                {o.ticket || <span className="text-brand-text/30">—</span>}
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm font-body table-fixed min-w-[620px]">
+          <colgroup>
+            <col style={{ width: "38%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "16%" }} />
+            <col style={{ width: "22%" }} />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-brand-cream-dark text-left text-brand-text/50 text-xs">
+              <th className="py-1 pr-3 font-normal">SKU</th>
+              <th className="py-1 pr-3 font-normal">Size</th>
+              <th className="py-1 pr-3 font-normal">Width</th>
+              <th className="py-1 pr-3 font-normal">Ordered</th>
+              <th className="py-1 pr-0 font-normal">Ticket</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {customer.outstanding.map((o: OutstandingItem, idx) => (
+              <tr
+                key={idx}
+                className="border-b border-brand-cream last:border-0"
+              >
+                <td className="py-1 pr-3 font-mono text-xs">
+                  {o.sku === "SPECIAL" ? (
+                    <span className="print-special inline-block bg-amber-100 text-amber-800 font-semibold uppercase tracking-wide text-[10px] px-1.5 py-0.5 rounded">
+                      Special (custom)
+                    </span>
+                  ) : (
+                    o.sku
+                  )}
+                </td>
+                <td className="py-1 pr-3 whitespace-nowrap">
+                  {formatSize(o.size) || (
+                    <span className="text-brand-text/30">—</span>
+                  )}
+                </td>
+                <td className="py-1 pr-3 whitespace-nowrap">
+                  {o.width || <span className="text-brand-text/30">—</span>}
+                </td>
+                <td className="py-1 pr-3 whitespace-nowrap text-brand-text/60">
+                  {fmtOrderDate(o.date)}
+                </td>
+                <td className="py-1 pr-0 whitespace-nowrap font-mono text-xs text-brand-text/60">
+                  {o.ticket || <span className="text-brand-text/30">—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
