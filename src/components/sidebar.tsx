@@ -14,6 +14,7 @@ import {
   Users,
   BarChart3,
   Tag,
+  ClipboardList,
   Settings,
   LogOut,
   X,
@@ -28,6 +29,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Users,
   BarChart3,
   Tag,
+  ClipboardList,
 };
 
 interface SidebarProps {

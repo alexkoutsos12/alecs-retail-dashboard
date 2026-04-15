@@ -70,6 +70,25 @@ export const appModules: AppModule[] = [
     ],
   },
   {
+    id: "special-orders",
+    name: "Special Orders",
+    description:
+      "Outstanding customer special orders from the RICS Customer List — Special Orders report.",
+    firestoreModule: "special-orders",
+    navItems: [
+      {
+        label: "Current Orders",
+        href: "/special-orders/current-orders",
+        icon: "ClipboardList",
+      },
+      { label: "Import", href: "/special-orders/import", icon: "Upload" },
+    ],
+    importRoute: "/special-orders/import",
+    reportRoutes: [
+      { label: "Current Orders →", href: "/special-orders/current-orders" },
+    ],
+  },
+  {
     id: "perk-inventory",
     name: "Perk Inventory",
     description:

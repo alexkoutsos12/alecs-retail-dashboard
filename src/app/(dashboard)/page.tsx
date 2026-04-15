@@ -34,6 +34,8 @@ interface ModuleStats {
   importDate: string | null;
   lastImportDate: string | null;
   genderBreakdown: { mens: number; womens: number; childrens: number } | null;
+  totalCustomers: number;
+  totalOutstanding: number;
 }
 
 function fmt(d: string) {
@@ -107,6 +109,8 @@ export default function HomePage() {
             dateRange: data.dateRange ?? null,
             importDate: data.importDate ?? null,
             genderBreakdown: data.genderBreakdown ?? null,
+            totalCustomers: data.totalCustomers ?? 0,
+            totalOutstanding: data.totalOutstanding ?? 0,
             lastImportDate: data.uploadedAt
               ? data.uploadedAt.toDate().toLocaleDateString("en-US", {
                   month: "2-digit",
@@ -171,6 +175,8 @@ export default function HomePage() {
                     <div className="text-brand-text/40 text-xs font-body mb-4">
                       {mod.id === "perk-tracker" ? (
                         <p>{stats.totalOutletItems} outlet items &middot; {stats.totalPerkItems} perk items &middot; Last import: {stats.lastImportDate}</p>
+                      ) : mod.id === "special-orders" ? (
+                        <p>{stats.totalOutstanding} outstanding item{stats.totalOutstanding === 1 ? "" : "s"} &middot; {stats.totalCustomers} customer{stats.totalCustomers === 1 ? "" : "s"} &middot; As of {stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}</p>
                       ) : mod.id === "perk-inventory" ? (
                         <>
                           <p>{stats.totalSkus} active incentives &middot; As of {stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}</p>
@@ -186,6 +192,8 @@ export default function HomePage() {
                     <p className="text-brand-text/40 text-xs font-body mb-4">
                       {mod.id === "perk-inventory"
                         ? "No perk inventory imported yet."
+                        : mod.id === "special-orders"
+                        ? "No special orders imported yet."
                         : "No data yet — import your first file"}
                     </p>
                   )}
