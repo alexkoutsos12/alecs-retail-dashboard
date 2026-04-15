@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   collection,
@@ -12,6 +12,8 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { appModules } from "@/lib/modules";
+import { useAuth } from "@/lib/auth-context";
+import { visibleModules } from "@/lib/permissions";
 
 interface ReportRow {
   id: string;
@@ -59,6 +61,11 @@ function SkeletonCard() {
 }
 
 export default function HomePage() {
+  const { userData } = useAuth();
+  const mods = useMemo(
+    () => visibleModules(userData, appModules),
+    [userData]
+  );
   const [recentImports, setRecentImports] = useState<ReportRow[]>([]);
   const [moduleStats, setModuleStats] = useState<Record<string, ModuleStats>>(
     {}
@@ -86,9 +93,10 @@ export default function HomePage() {
       })) as ReportRow[];
       setRecentImports(recent);
 
-      // Per-module stats from most recent import
+      // Per-module stats from most recent import (only for modules this
+      // user can see, so viewers don't hit denied reads).
       const statsMap: Record<string, ModuleStats> = {};
-      for (const mod of appModules) {
+      for (const mod of visibleModules(userData, appModules)) {
         const modSnap = await getDocs(
           query(
             reportsRef,
@@ -157,8 +165,8 @@ export default function HomePage() {
       {/* Module cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
         {loading
-          ? appModules.map((mod) => <SkeletonCard key={mod.id} />)
-          : appModules.map((mod) => {
+          ? mods.map((mod) => <SkeletonCard key={mod.id} />)
+          : mods.map((mod) => {
               const stats = moduleStats[mod.id];
               return (
                 <div

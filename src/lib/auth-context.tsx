@@ -5,11 +5,15 @@ import { User, onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
+export type UserRole = "admin" | "manager" | "viewer";
+
 interface UserData {
   email: string;
   name: string;
   photoURL: string;
-  role: "admin" | "manager";
+  role: UserRole;
+  /** Only meaningful for viewers — list of module ids they can access. */
+  allowedModules?: string[];
   createdAt: unknown;
 }
 
@@ -61,12 +65,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const allowSnap = await getDoc(allowRef);
 
             if (allowSnap.exists()) {
-              // Approved — create their user doc
+              // Approved — create their user doc. The admin may have
+              // pre-assigned a role + allowedModules when adding the email;
+              // fall back to "manager" for legacy allowlist entries.
+              const allow = allowSnap.data() as {
+                role?: UserRole;
+                allowedModules?: string[];
+              };
+              const role: UserRole =
+                allow.role === "admin" ||
+                allow.role === "manager" ||
+                allow.role === "viewer"
+                  ? allow.role
+                  : "manager";
               const newUser: UserData = {
                 email,
                 name: firebaseUser.displayName || "",
                 photoURL: firebaseUser.photoURL || "",
-                role: "manager",
+                role,
+                ...(role === "viewer" && Array.isArray(allow.allowedModules)
+                  ? { allowedModules: allow.allowedModules }
+                  : {}),
                 createdAt: serverTimestamp(),
               };
               await setDoc(userRef, newUser);

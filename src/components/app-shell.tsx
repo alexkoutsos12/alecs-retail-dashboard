@@ -1,14 +1,21 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import Sidebar from "./sidebar";
 import { Menu } from "lucide-react";
+import { appModules } from "@/lib/modules";
+import {
+  canAccessModule,
+  canAccessSettings,
+  canImport,
+} from "@/lib/permissions";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, userData, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -16,6 +23,38 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       router.push("/login");
     }
   }, [user, loading, router]);
+
+  // Route guard — redirect users who land on a path their role can't see.
+  // The Settings page has its own inline "Access Denied" UI, so we leave it
+  // alone and only guard module paths + the Import links within those.
+  useEffect(() => {
+    if (loading || !user || !userData || !pathname) return;
+
+    // Home is always allowed
+    if (pathname === "/") return;
+
+    // Settings handled by its own page.
+    if (pathname.startsWith("/settings")) {
+      if (!canAccessSettings(userData)) router.replace("/");
+      return;
+    }
+
+    // Find which module this path belongs to.
+    const mod = appModules.find((m) =>
+      pathname === `/${m.id}` || pathname.startsWith(`/${m.id}/`)
+    );
+    if (!mod) return;
+
+    if (!canAccessModule(userData, mod.id)) {
+      router.replace("/");
+      return;
+    }
+
+    // Viewer cannot hit import pages even for modules they can see.
+    if (pathname === mod.importRoute && !canImport(userData)) {
+      router.replace("/");
+    }
+  }, [pathname, userData, user, loading, router]);
 
   // Close mobile menu on route change
   useEffect(() => {

@@ -19,12 +19,21 @@ import {
 import { ref as storageRef, deleteObject } from "firebase/storage";
 import { appModules } from "@/lib/modules";
 
+type UserRole = "admin" | "manager" | "viewer";
+
 interface UserDoc {
   uid: string;
   name: string;
   email: string;
-  role: "admin" | "manager";
+  role: UserRole;
+  allowedModules?: string[];
   createdAt: { toDate: () => Date } | null;
+}
+
+interface AllowedEmailDoc {
+  email: string;
+  role?: UserRole;
+  allowedModules?: string[];
 }
 
 interface ReportDoc {
@@ -101,10 +110,12 @@ export default function SettingsPage() {
   const [loadingReports, setLoadingReports] = useState(true);
   const [reportsError, setReportsError] = useState<string | null>(null);
 
-  const [allowedEmails, setAllowedEmails] = useState<string[]>([]);
+  const [allowedEmails, setAllowedEmails] = useState<AllowedEmailDoc[]>([]);
   const [loadingEmails, setLoadingEmails] = useState(true);
   const [emailsError, setEmailsError] = useState<string | null>(null);
   const [newEmail, setNewEmail] = useState("");
+  const [newEmailRole, setNewEmailRole] = useState<UserRole>("manager");
+  const [newEmailModules, setNewEmailModules] = useState<string[]>([]);
   const [removeEmailDialog, setRemoveEmailDialog] = useState<string | null>(
     null
   );
@@ -152,7 +163,19 @@ export default function SettingsPage() {
     setEmailsError(null);
     try {
       const snap = await getDocs(collection(db, "allowedEmails"));
-      setAllowedEmails(snap.docs.map((d) => d.id).sort());
+      const rows: AllowedEmailDoc[] = snap.docs.map((d) => {
+        const data = d.data() as {
+          role?: UserRole;
+          allowedModules?: string[];
+        };
+        return {
+          email: d.id,
+          role: data.role,
+          allowedModules: data.allowedModules,
+        };
+      });
+      rows.sort((a, b) => a.email.localeCompare(b.email));
+      setAllowedEmails(rows);
     } catch (err) {
       console.error("fetchAllowedEmails error:", err);
       setEmailsError("Failed to load allowed emails. Check Firestore rules — the allowedEmails collection may need read/write access for authenticated users.");
@@ -167,17 +190,36 @@ export default function SettingsPage() {
       toast.error("Please enter a valid email address.");
       return;
     }
-    if (allowedEmails.includes(email)) {
+    if (allowedEmails.some((e) => e.email === email)) {
       toast.error("Email already in the list.");
+      return;
+    }
+    if (newEmailRole === "viewer" && newEmailModules.length === 0) {
+      toast.error("Select at least one module for a viewer.");
       return;
     }
     try {
       await setDoc(doc(db, "allowedEmails", email), {
         addedBy: user?.email || "",
         addedAt: new Date().toISOString(),
+        role: newEmailRole,
+        ...(newEmailRole === "viewer"
+          ? { allowedModules: newEmailModules }
+          : {}),
       });
-      setAllowedEmails((prev) => [...prev, email].sort());
+      const newRow: AllowedEmailDoc = {
+        email,
+        role: newEmailRole,
+        ...(newEmailRole === "viewer"
+          ? { allowedModules: newEmailModules }
+          : {}),
+      };
+      setAllowedEmails((prev) =>
+        [...prev, newRow].sort((a, b) => a.email.localeCompare(b.email))
+      );
       setNewEmail("");
+      setNewEmailRole("manager");
+      setNewEmailModules([]);
       toast.success("Email added.");
     } catch {
       toast.error("Failed to add email.");
@@ -198,12 +240,18 @@ export default function SettingsPage() {
         setUsers((prev) => prev.filter((u) => u.uid !== matchingUser.uid));
       }
 
-      setAllowedEmails((prev) => prev.filter((e) => e !== email));
+      setAllowedEmails((prev) => prev.filter((e) => e.email !== email));
       setRemoveEmailDialog(null);
       toast.success("Email removed and access revoked.");
     } catch {
       toast.error("Failed to remove email.");
     }
+  };
+
+  const toggleNewEmailModule = (id: string) => {
+    setNewEmailModules((prev) =>
+      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
+    );
   };
 
   useEffect(() => {
@@ -214,19 +262,50 @@ export default function SettingsPage() {
     fetchAllowedEmails();
   }, [userData?.role, fetchUsers, fetchReports, fetchAllowedEmails]);
 
-  const handleRoleChange = async (
-    uid: string,
-    newRole: "admin" | "manager"
-  ) => {
+  const handleRoleChange = async (uid: string, newRole: UserRole) => {
     try {
-      await updateDoc(doc(db, "users", uid), { role: newRole });
+      // Clearing allowedModules when leaving viewer keeps the user doc tidy.
+      await updateDoc(doc(db, "users", uid), {
+        role: newRole,
+        ...(newRole !== "viewer" ? { allowedModules: [] } : {}),
+      });
       setUsers((prev) =>
-        prev.map((u) => (u.uid === uid ? { ...u, role: newRole } : u))
+        prev.map((u) =>
+          u.uid === uid
+            ? {
+                ...u,
+                role: newRole,
+                allowedModules:
+                  newRole === "viewer" ? u.allowedModules ?? [] : [],
+              }
+            : u
+        )
       );
       toast.success("Role updated.");
     } catch {
       toast.error("Failed to update role.");
     }
+  };
+
+  const handleUserModulesChange = async (uid: string, modules: string[]) => {
+    try {
+      await updateDoc(doc(db, "users", uid), { allowedModules: modules });
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.uid === uid ? { ...u, allowedModules: modules } : u
+        )
+      );
+    } catch {
+      toast.error("Failed to update allowed modules.");
+    }
+  };
+
+  const toggleUserModule = (user: UserDoc, moduleId: string) => {
+    const current = user.allowedModules ?? [];
+    const next = current.includes(moduleId)
+      ? current.filter((m) => m !== moduleId)
+      : [...current, moduleId];
+    handleUserModulesChange(user.uid, next);
   };
 
   const handleDeleteReport = async (report: ReportDoc) => {
@@ -391,19 +470,47 @@ export default function SettingsPage() {
                             </span>
                           </span>
                         ) : (
-                          <select
-                            value={u.role}
-                            onChange={(e) =>
-                              handleRoleChange(
-                                u.uid,
-                                e.target.value as "admin" | "manager"
-                              )
-                            }
-                            className="font-body text-sm border border-brand-cream-dark rounded px-2 py-0.5 bg-white focus:outline-none focus:border-brand-green"
-                          >
-                            <option value="admin">admin</option>
-                            <option value="manager">manager</option>
-                          </select>
+                          <div className="flex flex-col gap-1.5">
+                            <select
+                              value={u.role}
+                              onChange={(e) =>
+                                handleRoleChange(
+                                  u.uid,
+                                  e.target.value as UserRole
+                                )
+                              }
+                              className="font-body text-sm border border-brand-cream-dark rounded px-2 py-0.5 bg-white focus:outline-none focus:border-brand-green"
+                            >
+                              <option value="admin">admin</option>
+                              <option value="manager">manager</option>
+                              <option value="viewer">viewer</option>
+                            </select>
+                            {u.role === "viewer" && (
+                              <div className="flex flex-wrap gap-1">
+                                {appModules.map((mod) => {
+                                  const active = (
+                                    u.allowedModules ?? []
+                                  ).includes(mod.id);
+                                  return (
+                                    <button
+                                      key={mod.id}
+                                      type="button"
+                                      onClick={() =>
+                                        toggleUserModule(u, mod.id)
+                                      }
+                                      className={`font-body text-[11px] px-1.5 py-0.5 rounded border transition-colors ${
+                                        active
+                                          ? "bg-brand-green text-brand-cream border-brand-green"
+                                          : "bg-white text-brand-text/60 border-brand-cream-dark hover:border-brand-green"
+                                      }`}
+                                    >
+                                      {mod.name}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </td>
                       <td className="px-4 py-2 text-brand-text/60">
@@ -432,21 +539,62 @@ export default function SettingsPage() {
         </p>
 
         {/* Add email input */}
-        <div className="flex gap-2 mb-4">
-          <input
-            type="email"
-            placeholder="new-user@example.com"
-            value={newEmail}
-            onChange={(e) => setNewEmail(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAddEmail()}
-            className="flex-1 font-body text-sm border border-brand-cream-dark rounded px-3 py-2 bg-white focus:outline-none focus:border-brand-green"
-          />
-          <button
-            onClick={handleAddEmail}
-            className="bg-brand-green text-brand-cream font-body text-sm px-4 py-2 rounded hover:bg-brand-green-mid transition-colors whitespace-nowrap"
-          >
-            Add Email
-          </button>
+        <div className="bg-white border-l-[3px] border-brand-green rounded p-4 mb-4 space-y-3">
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="email"
+              placeholder="new-user@example.com"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAddEmail()}
+              className="flex-1 font-body text-sm border border-brand-cream-dark rounded px-3 py-2 bg-white focus:outline-none focus:border-brand-green"
+            />
+            <select
+              value={newEmailRole}
+              onChange={(e) => {
+                const r = e.target.value as UserRole;
+                setNewEmailRole(r);
+                if (r !== "viewer") setNewEmailModules([]);
+              }}
+              className="font-body text-sm border border-brand-cream-dark rounded px-3 py-2 bg-white focus:outline-none focus:border-brand-green"
+            >
+              <option value="admin">admin</option>
+              <option value="manager">manager</option>
+              <option value="viewer">viewer (scoped)</option>
+            </select>
+            <button
+              onClick={handleAddEmail}
+              className="bg-brand-green text-brand-cream font-body text-sm px-4 py-2 rounded hover:bg-brand-green-mid transition-colors whitespace-nowrap"
+            >
+              Add Email
+            </button>
+          </div>
+          {newEmailRole === "viewer" && (
+            <div>
+              <p className="font-body text-xs text-brand-text/50 mb-2">
+                Which modules can this viewer see?
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {appModules.map((mod) => {
+                  const active = newEmailModules.includes(mod.id);
+                  return (
+                    <button
+                      key={mod.id}
+                      type="button"
+                      onClick={() => toggleNewEmailModule(mod.id)}
+                      className={`font-body text-xs px-2 py-1 rounded border transition-colors ${
+                        active
+                          ? "bg-brand-green text-brand-cream border-brand-green"
+                          : "bg-white text-brand-text/60 border-brand-cream-dark hover:border-brand-green"
+                      }`}
+                    >
+                      {mod.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {loadingEmails ? (
@@ -461,23 +609,40 @@ export default function SettingsPage() {
           </div>
         ) : (
           <div className="bg-white border-l-[3px] border-brand-green rounded overflow-hidden">
-            {allowedEmails.map((email) => (
-              <div
-                key={email}
-                className="flex items-center justify-between px-4 py-2.5 border-b border-brand-cream last:border-0"
-              >
-                <span className="font-body text-sm text-brand-text/70">
-                  {email}
-                </span>
-                <button
-                  onClick={() => setRemoveEmailDialog(email)}
-                  className="text-brand-text/30 hover:text-red-500 transition-colors"
-                  title="Remove email"
+            {allowedEmails.map((row) => {
+              const modNames =
+                row.role === "viewer" && row.allowedModules?.length
+                  ? row.allowedModules
+                      .map(
+                        (id) =>
+                          appModules.find((m) => m.id === id)?.name ?? id
+                      )
+                      .join(", ")
+                  : "";
+              return (
+                <div
+                  key={row.email}
+                  className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-brand-cream last:border-0"
                 >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-body text-sm text-brand-text/70 truncate">
+                      {row.email}
+                    </div>
+                    <div className="font-body text-xs text-brand-text/40 truncate">
+                      {row.role ?? "manager"}
+                      {modNames && ` · ${modNames}`}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setRemoveEmailDialog(row.email)}
+                    className="text-brand-text/30 hover:text-red-500 transition-colors shrink-0"
+                    title="Remove email"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>

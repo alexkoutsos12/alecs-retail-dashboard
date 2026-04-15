@@ -6,6 +6,7 @@ import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { appModules } from "@/lib/modules";
+import { visibleModules, visibleNavItems } from "@/lib/permissions";
 import {
   Home,
   Upload,
@@ -90,13 +91,13 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
           </Link>
         </div>
 
-        {/* Module sections — driven by appModules registry */}
-        {appModules.map((mod) => (
+        {/* Module sections — driven by appModules registry, filtered by user role */}
+        {visibleModules(userData, appModules).map((mod) => (
           <div key={mod.id}>
             <p className="px-2 text-[10px] uppercase tracking-wider text-brand-cream/40 font-body mb-1">
               {mod.name}
             </p>
-            {mod.navItems.map((item) => {
+            {visibleNavItems(userData, mod).map((item) => {
               const Icon = ICON_MAP[item.icon];
               return (
                 <Link
