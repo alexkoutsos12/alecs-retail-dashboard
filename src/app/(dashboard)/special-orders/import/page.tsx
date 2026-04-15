@@ -313,19 +313,7 @@ export default function SpecialOrdersImportPage() {
             )}
           </div>
 
-          {/* RICS setup instructions */}
-          <div className="mt-4 mb-4 bg-brand-cream/60 rounded p-4">
-            <p className="font-body text-xs font-semibold text-brand-text/60 mb-2">
-              RICS Report Setup
-            </p>
-            <p className="font-body text-xs text-brand-text/50 mb-1">
-              Run a <strong>Customer List — Special Orders</strong> report with
-              default options (accounts without zero balance, sorted by account
-              number).
-            </p>
-          </div>
-
-          <div className="flex justify-end">
+          <div className="flex justify-end mt-4">
             <button
               onClick={handleImport}
               disabled={!selectedFile}
