@@ -6,11 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import Sidebar from "./sidebar";
 import { Menu } from "lucide-react";
 import { appModules } from "@/lib/modules";
-import {
-  canAccessModule,
-  canAccessSettings,
-  canImport,
-} from "@/lib/permissions";
+import { canAccessModule, canAccessSettings } from "@/lib/permissions";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, userData, loading } = useAuth();
@@ -24,16 +20,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [user, loading, router]);
 
-  // Route guard — redirect users who land on a path their role can't see.
-  // The Settings page has its own inline "Access Denied" UI, so we leave it
-  // alone and only guard module paths + the Import links within those.
+  // Route guard — redirect users who land on a path their role doesn't
+  // cover. Within a module a user either has full access (import, delete,
+  // view) or no access; there's no "view-only within a module" tier.
   useEffect(() => {
     if (loading || !user || !userData || !pathname) return;
 
-    // Home is always allowed
+    // Home is always allowed.
     if (pathname === "/") return;
 
-    // Settings handled by its own page.
+    // Settings has its own inline "Access Denied" UI, but we redirect
+    // non-admins here so they don't even see the flash.
     if (pathname.startsWith("/settings")) {
       if (!canAccessSettings(userData)) router.replace("/");
       return;
@@ -46,12 +43,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (!mod) return;
 
     if (!canAccessModule(userData, mod.id)) {
-      router.replace("/");
-      return;
-    }
-
-    // Viewer cannot hit import pages even for modules they can see.
-    if (pathname === mod.importRoute && !canImport(userData)) {
       router.replace("/");
     }
   }, [pathname, userData, user, loading, router]);

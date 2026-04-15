@@ -3,14 +3,15 @@ rules_version = '2';
 // Security rules for Alec's Dashboard Firestore.
 //
 // Roles (stored on users/{uid}.role):
-//   - admin:   full read/write, manages users, can delete any report
-//   - manager: full read on users (via user doc); can read/write reports
-//   - viewer:  scoped to modules listed in users/{uid}.allowedModules;
-//              cannot write reports, cannot read other modules' reports
+//   - admin:   full read/write on everything, including Settings.
+//   - viewer:  full read/write on reports for the modules listed in
+//              users/{uid}.allowedModules. No Settings access.
+//   - manager: LEGACY. Treated as admin until auth-context silently
+//              migrates the doc to "admin" on next sign-in.
 //
 // Paste this file's contents into Firebase Console → Firestore → Rules
-// whenever it changes. The file is version-controlled here so we don't lose
-// history; the console is still the source of truth at runtime.
+// whenever it changes. The file is version-controlled here so we don't
+// lose history; the console is still the source of truth at runtime.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -21,53 +22,50 @@ service cloud.firestore {
       return userDoc().role;
     }
     function allowedModules() {
-      // Returns an empty list if the field is missing so `in` checks don't blow up.
+      // Empty list if missing so `in` checks don't explode.
       return userDoc().get('allowedModules', []);
     }
     function isSignedIn() {
       return request.auth != null;
     }
-    function isAdmin() {
-      return isSignedIn() && role() == 'admin';
-    }
-    function isManager() {
-      return isSignedIn() && role() == 'manager';
+    function isAdminLike() {
+      // "manager" is legacy; treat as admin until migrated.
+      return isSignedIn() && (role() == 'admin' || role() == 'manager');
     }
     function isViewer() {
       return isSignedIn() && role() == 'viewer';
     }
     function canSeeModule(mod) {
-      return isAdmin() || isManager() || (isViewer() && mod in allowedModules());
+      return isAdminLike() || (isViewer() && mod in allowedModules());
     }
 
-    // Users: self-read/write; admins can read & write anyone.
+    // Users: self-read/write; admins can read/write anyone.
     match /users/{uid} {
       allow read, write: if isSignedIn() && request.auth.uid == uid;
-      allow read, write: if isAdmin();
+      allow read, write: if isAdminLike();
     }
 
-    // Reports: scoped reads (viewers only see modules they're allowed to);
-    // writes require admin or manager; only admin can delete.
+    // Reports: full module-scoped access. Anyone allowed into a module
+    // can read, create, update, and delete reports in that module.
     match /reports/{reportId} {
       allow read: if isSignedIn() && canSeeModule(resource.data.module);
-      allow create: if isSignedIn() && (isAdmin() || isManager());
-      allow update: if isSignedIn() && (isAdmin() || isManager());
-      allow delete: if isAdmin();
+      allow create: if isSignedIn()
+        && canSeeModule(request.resource.data.module);
+      allow update: if isSignedIn()
+        && canSeeModule(resource.data.module)
+        && canSeeModule(request.resource.data.module);
+      allow delete: if isSignedIn() && canSeeModule(resource.data.module);
     }
 
     match /transactions/{txnId} {
       allow read, write: if isSignedIn();
     }
 
-    // Allowlist: any signed-in admin can read/write. Non-admins have no
-    // reason to touch this collection (the auth-context reads it by the
-    // specific email on sign-in, which bypasses the list permission).
+    // Allowlist: only admin can list / write. Any signed-in user may
+    // read a single known email doc (needed by auth-context at sign-in
+    // before the user has a user doc of their own).
     match /allowedEmails/{email} {
-      allow read, write: if isAdmin();
-      // Permit an unauthenticated doc lookup at sign-in time is NOT required —
-      // the auth-context runs after Firebase sign-in completes, so the user
-      // is already authenticated when it reads this. Keeping admin-only
-      // write prevents managers/viewers from self-granting access.
+      allow list, write: if isAdminLike();
       allow get: if isSignedIn();
     }
   }

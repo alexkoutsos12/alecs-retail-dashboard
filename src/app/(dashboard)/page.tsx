@@ -83,15 +83,32 @@ export default function HomePage() {
     try {
       const reportsRef = collection(db, "reports");
 
-      // Last 5 imports across all modules
-      const recentSnap = await getDocs(
-        query(reportsRef, orderBy("uploadedAt", "desc"), limit(5))
+      // Last 5 imports — for viewers, scope to modules they can see so
+      // Firestore rules don't reject the whole query. Admins get the
+      // unfiltered list across every module.
+      const visibleIds = visibleModules(userData, appModules).map(
+        (m) => m.firestoreModule
       );
-      const recent = recentSnap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      })) as ReportRow[];
-      setRecentImports(recent);
+      const needsScope = userData?.role === "viewer";
+      if (needsScope && visibleIds.length === 0) {
+        // Viewer with no modules assigned — skip entirely.
+        setRecentImports([]);
+      } else {
+        const recentQuery = needsScope
+          ? query(
+              reportsRef,
+              where("module", "in", visibleIds),
+              orderBy("uploadedAt", "desc"),
+              limit(5)
+            )
+          : query(reportsRef, orderBy("uploadedAt", "desc"), limit(5));
+        const recentSnap = await getDocs(recentQuery);
+        const recent = recentSnap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        })) as ReportRow[];
+        setRecentImports(recent);
+      }
 
       // Per-module stats from most recent import (only for modules this
       // user can see, so viewers don't hit denied reads).

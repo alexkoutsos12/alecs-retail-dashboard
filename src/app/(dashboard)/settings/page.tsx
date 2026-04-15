@@ -19,7 +19,10 @@ import {
 import { ref as storageRef, deleteObject } from "firebase/storage";
 import { appModules } from "@/lib/modules";
 
-type UserRole = "admin" | "manager" | "viewer";
+// Only "admin" and "viewer" are assignable going forward. "manager" is
+// legacy — auth-context migrates existing manager docs to admin on login,
+// so it can still appear briefly in the list until that user logs in.
+type UserRole = "admin" | "viewer" | "manager";
 
 interface UserDoc {
   uid: string;
@@ -114,7 +117,7 @@ export default function SettingsPage() {
   const [loadingEmails, setLoadingEmails] = useState(true);
   const [emailsError, setEmailsError] = useState<string | null>(null);
   const [newEmail, setNewEmail] = useState("");
-  const [newEmailRole, setNewEmailRole] = useState<UserRole>("manager");
+  const [newEmailRole, setNewEmailRole] = useState<UserRole>("viewer");
   const [newEmailModules, setNewEmailModules] = useState<string[]>([]);
   const [removeEmailDialog, setRemoveEmailDialog] = useState<string | null>(
     null
@@ -218,7 +221,7 @@ export default function SettingsPage() {
         [...prev, newRow].sort((a, b) => a.email.localeCompare(b.email))
       );
       setNewEmail("");
-      setNewEmailRole("manager");
+      setNewEmailRole("viewer");
       setNewEmailModules([]);
       toast.success("Email added.");
     } catch {
@@ -482,8 +485,10 @@ export default function SettingsPage() {
                               className="font-body text-sm border border-brand-cream-dark rounded px-2 py-0.5 bg-white focus:outline-none focus:border-brand-green"
                             >
                               <option value="admin">admin</option>
-                              <option value="manager">manager</option>
                               <option value="viewer">viewer</option>
+                              {u.role === "manager" && (
+                                <option value="manager">manager (legacy)</option>
+                              )}
                             </select>
                             {u.role === "viewer" && (
                               <div className="flex flex-wrap gap-1">
@@ -558,9 +563,8 @@ export default function SettingsPage() {
               }}
               className="font-body text-sm border border-brand-cream-dark rounded px-3 py-2 bg-white focus:outline-none focus:border-brand-green"
             >
-              <option value="admin">admin</option>
-              <option value="manager">manager</option>
               <option value="viewer">viewer (scoped)</option>
+              <option value="admin">admin</option>
             </select>
             <button
               onClick={handleAddEmail}

@@ -5,7 +5,18 @@ import { User, onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
-export type UserRole = "admin" | "manager" | "viewer";
+/**
+ * User roles.
+ *
+ * We support two active roles: `admin` (full access) and `viewer` (full
+ * access scoped to a specific list of module IDs via `allowedModules`).
+ *
+ * `manager` is a legacy role that's being phased out. Any user doc still
+ * carrying `role: "manager"` is silently migrated to `admin` on their next
+ * sign-in (see auth-context below). The type union keeps it for the
+ * migration transition only.
+ */
+export type UserRole = "admin" | "viewer" | "manager";
 
 interface UserData {
   email: string;
@@ -50,11 +61,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const userSnap = await getDoc(userRef);
 
           if (userSnap.exists()) {
-            // Existing user — always allowed
-            await updateDoc(userRef, {
+            // Existing user — always allowed.
+            // Migrate legacy "manager" role to "admin" transparently —
+            // the manager role is being retired in favor of admin + viewer.
+            const existing = userSnap.data() as UserData;
+            const patch: Partial<UserData> & Record<string, unknown> = {
               name: firebaseUser.displayName || "",
               photoURL: firebaseUser.photoURL || "",
-            });
+            };
+            if (existing.role === "manager") {
+              patch.role = "admin";
+            }
+            await updateDoc(userRef, patch);
             const updated = await getDoc(userRef);
             setUser(firebaseUser);
             setUserData(updated.data() as UserData);
@@ -67,24 +85,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (allowSnap.exists()) {
               // Approved — create their user doc. The admin may have
               // pre-assigned a role + allowedModules when adding the email;
-              // fall back to "manager" for legacy allowlist entries.
+              // fall back to a no-access viewer for legacy allowlist
+              // entries so nobody accidentally gets admin rights.
               const allow = allowSnap.data() as {
                 role?: UserRole;
                 allowedModules?: string[];
               };
-              const role: UserRole =
-                allow.role === "admin" ||
-                allow.role === "manager" ||
-                allow.role === "viewer"
-                  ? allow.role
-                  : "manager";
+              let role: UserRole;
+              if (allow.role === "admin") role = "admin";
+              else if (allow.role === "manager") role = "admin"; // migrate
+              else role = "viewer";
               const newUser: UserData = {
                 email,
                 name: firebaseUser.displayName || "",
                 photoURL: firebaseUser.photoURL || "",
                 role,
-                ...(role === "viewer" && Array.isArray(allow.allowedModules)
-                  ? { allowedModules: allow.allowedModules }
+                ...(role === "viewer"
+                  ? {
+                      allowedModules: Array.isArray(allow.allowedModules)
+                        ? allow.allowedModules
+                        : [],
+                    }
                   : {}),
                 createdAt: serverTimestamp(),
               };

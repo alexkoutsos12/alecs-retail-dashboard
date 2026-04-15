@@ -2,42 +2,63 @@
 //
 // Roles:
 //   - admin:   full access to everything, including Settings.
-//   - manager: access to all modules; no Settings.
-//   - viewer:  access limited to modules listed in allowedModules[]. No
-//              import, no Settings.
+//   - viewer:  full access to the modules listed in allowedModules — this
+//              means they can open the pages, import new reports, and
+//              delete reports for any module they're assigned to. They
+//              cannot see Settings and cannot touch modules they aren't
+//              assigned to.
+//   - manager: LEGACY. Older user docs may still have this role while
+//              migration has not yet run. Treated as admin for all gates
+//              below; auth-context migrates the doc to "admin" on next
+//              sign-in, after which this branch is unused.
 
 import type { AppModule, NavItem } from "@/lib/modules";
 
 export interface UserPermissions {
-  role: "admin" | "manager" | "viewer";
+  role: "admin" | "viewer" | "manager";
   allowedModules?: string[];
 }
 
-/** Can this user open this module at all? */
+function isAdminLike(user: UserPermissions | null): boolean {
+  // Legacy "manager" docs are treated as admin until auth-context migrates
+  // them. Once migrated, this branch is dead.
+  return user?.role === "admin" || user?.role === "manager";
+}
+
 export function canAccessModule(
   user: UserPermissions | null,
   moduleId: string
 ): boolean {
   if (!user) return false;
-  if (user.role === "admin" || user.role === "manager") return true;
+  if (isAdminLike(user)) return true;
   if (user.role === "viewer") {
     return (user.allowedModules ?? []).includes(moduleId);
   }
   return false;
 }
 
-/** Can this user upload new imports for this module? */
-export function canImport(user: UserPermissions | null): boolean {
-  if (!user) return false;
-  return user.role === "admin" || user.role === "manager";
+/** Can this user import new reports for `moduleId`? */
+export function canImport(
+  user: UserPermissions | null,
+  moduleId: string
+): boolean {
+  return canAccessModule(user, moduleId);
 }
 
-/** Can this user see admin Settings? */
+/** Can this user delete a report in `moduleId`? */
+export function canDeleteReport(
+  user: UserPermissions | null,
+  moduleId: string
+): boolean {
+  return canAccessModule(user, moduleId);
+}
+
+/** Can this user see the admin Settings page? */
 export function canAccessSettings(user: UserPermissions | null): boolean {
-  return user?.role === "admin";
+  return isAdminLike(user);
 }
 
-/** Return the subset of modules this user can see in the nav/home. */
+/** Modules visible to this user in the nav/home. */
 export function visibleModules(
   user: UserPermissions | null,
   modules: AppModule[]
@@ -45,12 +66,14 @@ export function visibleModules(
   return modules.filter((m) => canAccessModule(user, m.id));
 }
 
-/** Within an accessible module, filter the nav items a user should see. */
+/**
+ * All nav items within a visible module. (Previously filtered out the
+ * Import link for viewers; now viewers get full module access so nothing
+ * is filtered here.)
+ */
 export function visibleNavItems(
-  user: UserPermissions | null,
+  _user: UserPermissions | null,
   mod: AppModule
 ): NavItem[] {
-  if (canImport(user)) return mod.navItems;
-  // Viewers don't get the Import link.
-  return mod.navItems.filter((n) => n.href !== mod.importRoute);
+  return mod.navItems;
 }

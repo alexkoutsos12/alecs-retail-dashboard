@@ -11,6 +11,7 @@ import {
 import Link from "next/link";
 import { Upload, CheckCircle, AlertCircle, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { canDeleteReport } from "@/lib/permissions";
 import { db, storage } from "@/lib/firebase";
 import {
   collection,
@@ -80,7 +81,6 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 
 export default function TeamPerformanceImportPage() {
   const { user, userData } = useAuth();
-  const isAdmin = userData?.role === "admin";
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -625,7 +625,7 @@ export default function TeamPerformanceImportPage() {
               </thead>
               <tbody>
                 {recentImports.map((row) => {
-                  const canDelete = isAdmin || row.uploadedBy === user?.uid;
+                  const canDelete = canDeleteReport(userData, "team-performance");
                   return (
                     <tr
                       key={row.id}
