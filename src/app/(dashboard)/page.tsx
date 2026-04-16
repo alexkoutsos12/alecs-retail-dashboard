@@ -211,7 +211,7 @@ export default function HomePage() {
                       ) : mod.id === "special-orders" ? (
                         <p>{stats.totalOutstanding} outstanding item{stats.totalOutstanding === 1 ? "" : "s"} &middot; {stats.totalCustomers} customer{stats.totalCustomers === 1 ? "" : "s"} &middot; As of {stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}</p>
                       ) : mod.id === "shoe-clubs" ? (
-                        <p>{stats.outstandingCount} outstanding &middot; {stats.completedCount} completed &middot; {stats.newClubCount} new &middot; As of {stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}</p>
+                        <p>{stats.totalCaptains} captain{stats.totalCaptains === 1 ? "" : "s"} &middot; {stats.outstandingCount} outstanding &middot; {stats.completedCount} completed &middot; {stats.newClubCount} new &middot; As of {stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}</p>
                       ) : mod.id === "perk-inventory" ? (
                         <>
                           <p>{stats.totalSkus} active incentives &middot; As of {stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}</p>

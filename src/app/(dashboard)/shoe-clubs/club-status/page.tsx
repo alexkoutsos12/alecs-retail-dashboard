@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
+import { Printer, AlertTriangle } from "lucide-react";
 import { db, storage } from "@/lib/firebase";
 import {
   collection,
@@ -35,6 +35,12 @@ function fmtDate(iso: string) {
   return `${parseInt(m, 10)}/${parseInt(d, 10)}/${y.slice(2)}`;
 }
 
+function fmtDateLong(iso: string) {
+  if (!iso) return "";
+  const [y, m, day] = iso.split("-");
+  return `${m}/${day}/${y}`;
+}
+
 function money(n: number) {
   return n.toLocaleString("en-US", {
     style: "currency",
@@ -44,8 +50,24 @@ function money(n: number) {
   });
 }
 
-function fullName(c: ShoeClubCaptain) {
-  return `${c.firstName} ${c.lastName}`.trim();
+/** "SMITH, J" — last name + first initial, used as the primary label. */
+function displayName(c: ShoeClubCaptain) {
+  const last = (c.lastName || "").toUpperCase();
+  const initial = (c.firstName || "").trim().charAt(0).toUpperCase();
+  if (!last && !initial) return "(no name)";
+  if (!initial) return last;
+  return `${last}, ${initial}`;
+}
+
+/** Week number out of 10 that the captain is currently in. */
+function currentWeekOf10(c: ShoeClubCaptain): number {
+  return Math.min(10, c.weeksElapsed + 1);
+}
+
+/** How many weekly installments have actually been paid. */
+function weeksPaid(c: ShoeClubCaptain): number {
+  if (c.weeklyAmount <= 0) return 0;
+  return Math.max(0, Math.floor(c.amountPaid / c.weeklyAmount));
 }
 
 /** "3 weeks behind" / "2 weeks ahead" / "On pace". */
@@ -144,12 +166,22 @@ export default function ClubStatusPage() {
     fetchData();
   }, [fetchData]);
 
+  // Parser already sorts within each category, but enforce it here in case
+  // the JSON on disk ever arrives out of order.
   const groups = useMemo(() => {
-    return {
-      outstanding: captains.filter((c) => c.category === "outstanding"),
-      completed: captains.filter((c) => c.category === "completed"),
-      newClub: captains.filter((c) => c.category === "new-club"),
-    };
+    const byLast = (a: ShoeClubCaptain, b: ShoeClubCaptain) =>
+      a.lastName.localeCompare(b.lastName) ||
+      a.firstName.localeCompare(b.firstName);
+    const outstanding = captains
+      .filter((c) => c.category === "outstanding")
+      .sort((a, b) => a.weeksBehind - b.weeksBehind || byLast(a, b));
+    const completed = captains
+      .filter((c) => c.category === "completed")
+      .sort(byLast);
+    const newClub = captains
+      .filter((c) => c.category === "new-club")
+      .sort(byLast);
+    return { outstanding, completed, newClub };
   }, [captains]);
 
   // ─── Render ─────────────────────────────────────────────────
@@ -207,57 +239,254 @@ export default function ClubStatusPage() {
 
   return (
     <div>
-      <h1 className="font-heading text-brand-green text-2xl font-bold mb-1">
-        Club Status
-      </h1>
-      <p className="text-brand-text/50 text-sm font-body mb-6">
-        {report.totalCaptains} captain{report.totalCaptains === 1 ? "" : "s"} ·
-        as of {fmtDate(report.importDate)}
+      {/* ─── Print styles ─── */}
+      <style jsx global>{`
+        @media print {
+          nav,
+          aside,
+          header,
+          [data-sidebar],
+          [data-topbar],
+          .no-print {
+            display: none !important;
+          }
+          body {
+            background: white !important;
+            color: black !important;
+            font-size: 9pt !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          main,
+          [data-main] {
+            padding: 0 !important;
+            margin: 0 !important;
+            max-width: 100% !important;
+          }
+          .print-only {
+            display: block !important;
+          }
+
+          /* Section containers — keep the header with its first rows so
+             a section never starts alone at the bottom of a page. */
+          .club-section {
+            break-inside: avoid-page;
+            page-break-inside: avoid;
+            margin-bottom: 10pt;
+          }
+          .club-section h2 {
+            break-after: avoid-page;
+            page-break-after: avoid;
+            color: black !important;
+            font-size: 11pt !important;
+            margin: 6pt 0 3pt 0 !important;
+          }
+          .club-section .section-lead {
+            break-after: avoid-page;
+            page-break-after: avoid;
+          }
+
+          /* Strip all decorative color/border treatments for print */
+          .club-section .club-card {
+            border: 1px solid #777 !important;
+            border-left: 1px solid #777 !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            background: white !important;
+            padding: 0 !important;
+          }
+
+          table {
+            font-size: 8.5pt !important;
+            width: 100% !important;
+          }
+          thead {
+            display: table-header-group; /* repeat header each page */
+          }
+          th,
+          td {
+            padding: 1px 5px !important;
+            color: black !important;
+            border-color: #ccc !important;
+          }
+          tr {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+
+          /* Pace badges — replace colored pills with plain text + an
+             outlined "OVERDUE" marker so nothing depends on color. */
+          .pace-badge {
+            background: transparent !important;
+            color: black !important;
+            padding: 0 !important;
+            border: none !important;
+            font-weight: 500 !important;
+          }
+          .pace-badge.overdue {
+            border: 1px solid #000 !important;
+            padding: 0 3px !important;
+            font-weight: 700 !important;
+          }
+
+          @page {
+            margin: 0.4in;
+            @bottom-center {
+              content: "Alec's Shoes · Shoe Club Status · Page "
+                counter(page) " of " counter(pages);
+              font-size: 8pt;
+              color: #666;
+            }
+          }
+        }
+      `}</style>
+
+      {/* ─── Print-only header ─── */}
+      <div className="print-only hidden" style={{ marginBottom: "8pt" }}>
+        <h1
+          style={{
+            fontFamily: "Playfair Display, serif",
+            fontSize: "16pt",
+            fontWeight: 700,
+            marginBottom: "2pt",
+            color: "black",
+          }}
+        >
+          Alec&apos;s Shoes — Shoe Club Status
+        </h1>
+        <p
+          style={{
+            fontSize: "9pt",
+            color: "#555",
+            borderBottom: "1px solid #999",
+            paddingBottom: "3pt",
+          }}
+        >
+          As of {fmtDateLong(report.importDate)} · {report.totalCaptains}{" "}
+          captain{report.totalCaptains === 1 ? "" : "s"} ·{" "}
+          {report.outstandingCount} outstanding · {report.completedCount}{" "}
+          completed · {report.newClubCount} new
+        </p>
+      </div>
+
+      {/* ─── Screen header ─── */}
+      <div className="no-print flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-1">
+        <h1 className="font-heading text-brand-green text-2xl font-bold">
+          Club Status
+        </h1>
+        <button
+          onClick={() => window.print()}
+          disabled={captains.length === 0}
+          title={captains.length === 0 ? "Nothing to print" : "Print / Save as PDF"}
+          className="flex items-center gap-1.5 bg-brand-green text-brand-cream font-body text-sm px-4 py-2 rounded hover:bg-brand-green-mid transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Printer className="w-4 h-4" />
+          Print / Save as PDF
+        </button>
+      </div>
+      <p className="no-print text-brand-text/50 text-sm font-body mb-5">
+        {report.totalCaptains} captain{report.totalCaptains === 1 ? "" : "s"}{" "}
+        &middot; {report.outstandingCount} outstanding &middot;{" "}
+        {report.completedCount} completed &middot; {report.newClubCount} new
+        &middot; as of {fmtDateLong(report.importDate)}
       </p>
 
-      {/* Outstanding Balance */}
+      {/* ─── Summary tiles (screen) ─── */}
+      <div className="no-print grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <SummaryTile
+          label="Total Captains"
+          value={report.totalCaptains}
+          tone="neutral"
+        />
+        <SummaryTile
+          label="Outstanding"
+          value={report.outstandingCount}
+          tone="amber"
+        />
+        <SummaryTile
+          label="Completed"
+          value={report.completedCount}
+          tone="green"
+        />
+        <SummaryTile
+          label="New Clubs"
+          value={report.newClubCount}
+          tone="blue"
+        />
+      </div>
+
+      {/* ─── 1. Outstanding ─── */}
       <Section
         title="Outstanding Balance"
-        subtitle="Active clubs with a remaining balance — most delinquent first."
+        subtitle="Active clubs with money still owed — most delinquent first."
         count={groups.outstanding.length}
       >
         {groups.outstanding.length === 0 ? (
-          <EmptyRow text="No active clubs with outstanding balances." />
+          <EmptyCard text="No active clubs with outstanding balances." />
         ) : (
-          <CaptainTable captains={groups.outstanding} showPace />
+          <OutstandingTable captains={groups.outstanding} />
         )}
       </Section>
 
-      {/* Completed Clubs */}
+      {/* ─── 2. Completed ─── */}
       <Section
         title="Completed Clubs"
         subtitle="Clubs that have finished and are fully paid."
         count={groups.completed.length}
       >
         {groups.completed.length === 0 ? (
-          <EmptyRow text="No completed clubs." />
+          <EmptyCard text="No completed clubs." />
         ) : (
-          <CaptainTable captains={groups.completed} />
+          <CompletedTable captains={groups.completed} />
         )}
       </Section>
 
-      {/* New Clubs */}
+      {/* ─── 3. New Clubs ─── */}
       <Section
         title="New Clubs"
-        subtitle="Captains who just started a new club — balance hasn't been reset in RICS yet."
+        subtitle="Negative balance — captain has started a new cycle that RICS hasn't adjusted yet."
         count={groups.newClub.length}
       >
         {groups.newClub.length === 0 ? (
-          <EmptyRow text="No new clubs pending." />
+          <EmptyCard text="No new clubs pending." />
         ) : (
-          <CaptainTable captains={groups.newClub} />
+          <NewClubTable captains={groups.newClub} />
         )}
       </Section>
     </div>
   );
 }
 
-// ─── Sub-components ─────────────────────────────────────────────
+// ─── Summary tile ───────────────────────────────────────────────
+
+function SummaryTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "neutral" | "amber" | "green" | "blue";
+}) {
+  const bar = {
+    neutral: "border-brand-green",
+    amber: "border-amber-500",
+    green: "border-emerald-500",
+    blue: "border-sky-500",
+  }[tone];
+  return (
+    <div className={`bg-white border-l-[3px] ${bar} rounded p-3`}>
+      <p className="font-body text-[10px] uppercase tracking-wider text-brand-text/40 mb-0.5">
+        {label}
+      </p>
+      <p className="font-heading text-brand-green text-2xl font-bold leading-none">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+// ─── Section shell ──────────────────────────────────────────────
 
 function Section({
   title,
@@ -271,49 +500,45 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="mb-8">
-      <div className="flex items-baseline gap-2 mb-1">
-        <h2 className="font-heading text-brand-green text-lg font-bold">
-          {title}
-        </h2>
-        <span className="font-body text-sm text-brand-text/40">({count})</span>
+    <section className="club-section mb-8">
+      <div className="section-lead">
+        <div className="flex items-baseline gap-2 mb-1">
+          <h2 className="font-heading text-brand-green text-lg font-bold">
+            {title} <span className="text-brand-text/40 font-normal text-base">({count})</span>
+          </h2>
+        </div>
+        <p className="font-body text-xs text-brand-text/50 mb-2">{subtitle}</p>
       </div>
-      <p className="font-body text-xs text-brand-text/50 mb-3">{subtitle}</p>
       {children}
     </section>
   );
 }
 
-function EmptyRow({ text }: { text: string }) {
+function EmptyCard({ text }: { text: string }) {
   return (
-    <div className="bg-white border-l-[3px] border-brand-green rounded p-5 text-center">
+    <div className="club-card bg-white border-l-[3px] border-brand-green rounded p-5 text-center">
       <p className="font-body text-sm text-brand-text/40">{text}</p>
     </div>
   );
 }
 
-function CaptainTable({
-  captains,
-  showPace = false,
-}: {
-  captains: ShoeClubCaptain[];
-  showPace?: boolean;
-}) {
+// ─── Outstanding table ──────────────────────────────────────────
+
+function OutstandingTable({ captains }: { captains: ShoeClubCaptain[] }) {
   return (
-    <div className="bg-white border-l-[3px] border-brand-green rounded overflow-hidden overflow-x-auto">
-      <table className="w-full text-sm font-body min-w-[720px]">
+    <div className="club-card bg-white border-l-[3px] border-brand-green rounded overflow-hidden overflow-x-auto">
+      <table className="w-full text-sm font-body min-w-[880px]">
         <thead>
-          <tr className="border-b border-brand-cream-dark text-left text-brand-text/50">
-            <th className="px-4 py-2 font-normal">Captain</th>
-            <th className="px-4 py-2 font-normal">Phone</th>
-            <th className="px-4 py-2 font-normal">Started</th>
-            <th className="px-4 py-2 font-normal text-right">Club Total</th>
-            <th className="px-4 py-2 font-normal text-right">Weekly</th>
-            <th className="px-4 py-2 font-normal text-right">Paid</th>
-            <th className="px-4 py-2 font-normal text-right">Balance</th>
-            {showPace && (
-              <th className="px-4 py-2 font-normal">Pace</th>
-            )}
+          <tr className="border-b border-brand-cream-dark text-left text-brand-text/50 text-xs">
+            <th className="px-3 py-2 font-normal">Captain</th>
+            <th className="px-3 py-2 font-normal">Phone</th>
+            <th className="px-3 py-2 font-normal">Started</th>
+            <th className="px-3 py-2 font-normal text-right">Total</th>
+            <th className="px-3 py-2 font-normal text-right">Weekly</th>
+            <th className="px-3 py-2 font-normal text-right">Balance</th>
+            <th className="px-3 py-2 font-normal text-center">Wk&nbsp;/&nbsp;10</th>
+            <th className="px-3 py-2 font-normal text-center">Paid</th>
+            <th className="px-3 py-2 font-normal">Status</th>
           </tr>
         </thead>
         <tbody>
@@ -322,42 +547,35 @@ function CaptainTable({
               key={c.accountNumber}
               className="border-b border-brand-cream last:border-0"
             >
-              <td className="px-4 py-2 whitespace-nowrap">
-                <div className="flex items-center gap-1.5">
-                  {c.isOverdue && (
-                    <AlertTriangle
-                      className="w-3.5 h-3.5 text-amber-600 shrink-0"
-                      aria-label="Overdue"
-                    />
-                  )}
-                  <span className="font-medium">{fullName(c)}</span>
-                </div>
+              <td className="px-3 py-1.5 whitespace-nowrap font-medium">
+                {displayName(c)}
               </td>
-              <td className="px-4 py-2 whitespace-nowrap text-brand-text/70 font-mono text-xs">
+              <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/70 font-mono text-xs">
                 {c.phoneNumber || (
                   <span className="text-brand-text/30">—</span>
                 )}
               </td>
-              <td className="px-4 py-2 whitespace-nowrap text-brand-text/60">
+              <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/60">
                 {fmtDate(c.clubStartDate)}
               </td>
-              <td className="px-4 py-2 whitespace-nowrap text-right">
+              <td className="px-3 py-1.5 whitespace-nowrap text-right">
                 {money(c.clubTotal)}
               </td>
-              <td className="px-4 py-2 whitespace-nowrap text-right text-brand-text/60">
+              <td className="px-3 py-1.5 whitespace-nowrap text-right text-brand-text/60">
                 {money(c.weeklyAmount)}
               </td>
-              <td className="px-4 py-2 whitespace-nowrap text-right text-brand-text/60">
-                {money(c.amountPaid)}
-              </td>
-              <td className="px-4 py-2 whitespace-nowrap text-right font-medium">
+              <td className="px-3 py-1.5 whitespace-nowrap text-right font-semibold">
                 {money(c.currentBalance)}
               </td>
-              {showPace && (
-                <td className="px-4 py-2 whitespace-nowrap">
-                  <PaceBadge captain={c} />
-                </td>
-              )}
+              <td className="px-3 py-1.5 whitespace-nowrap text-center text-brand-text/70">
+                {currentWeekOf10(c)}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-center text-brand-text/70">
+                {weeksPaid(c)}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap">
+                <StatusBadge captain={c} />
+              </td>
             </tr>
           ))}
         </tbody>
@@ -366,31 +584,128 @@ function CaptainTable({
   );
 }
 
-function PaceBadge({ captain: c }: { captain: ShoeClubCaptain }) {
+// ─── Completed table ────────────────────────────────────────────
+
+function CompletedTable({ captains }: { captains: ShoeClubCaptain[] }) {
+  return (
+    <div className="club-card bg-white border-l-[3px] border-brand-green rounded overflow-hidden overflow-x-auto">
+      <table className="w-full text-sm font-body min-w-[420px]">
+        <thead>
+          <tr className="border-b border-brand-cream-dark text-left text-brand-text/50 text-xs">
+            <th className="px-3 py-2 font-normal">Captain</th>
+            <th className="px-3 py-2 font-normal">Phone</th>
+            <th className="px-3 py-2 font-normal text-right">Club Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {captains.map((c) => (
+            <tr
+              key={c.accountNumber}
+              className="border-b border-brand-cream last:border-0"
+            >
+              <td className="px-3 py-1.5 whitespace-nowrap font-medium">
+                {displayName(c)}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/70 font-mono text-xs">
+                {c.phoneNumber || (
+                  <span className="text-brand-text/30">—</span>
+                )}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right">
+                {money(c.clubTotal)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── New-club table ─────────────────────────────────────────────
+
+function NewClubTable({ captains }: { captains: ShoeClubCaptain[] }) {
+  return (
+    <div className="club-card bg-white border-l-[3px] border-brand-green rounded overflow-hidden overflow-x-auto">
+      <table className="w-full text-sm font-body min-w-[620px]">
+        <thead>
+          <tr className="border-b border-brand-cream-dark text-left text-brand-text/50 text-xs">
+            <th className="px-3 py-2 font-normal">Captain</th>
+            <th className="px-3 py-2 font-normal">Phone</th>
+            <th className="px-3 py-2 font-normal text-right">Balance</th>
+            <th className="px-3 py-2 font-normal">Started</th>
+            <th className="px-3 py-2 font-normal text-right">Club Total</th>
+            <th className="px-3 py-2 font-normal text-right">Weekly</th>
+          </tr>
+        </thead>
+        <tbody>
+          {captains.map((c) => (
+            <tr
+              key={c.accountNumber}
+              className="border-b border-brand-cream last:border-0"
+            >
+              <td className="px-3 py-1.5 whitespace-nowrap font-medium">
+                {displayName(c)}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/70 font-mono text-xs">
+                {c.phoneNumber || (
+                  <span className="text-brand-text/30">—</span>
+                )}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right text-sky-700 font-semibold">
+                {money(c.currentBalance)}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/60">
+                {fmtDate(c.clubStartDate)}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right">
+                {money(c.clubTotal)}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right text-brand-text/60">
+                {money(c.weeklyAmount)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Status badge ───────────────────────────────────────────────
+//
+// Three tiers:
+//   - Overdue (cycle past week 10, balance still positive) — red, with an
+//     "OVERDUE — cycle ended" banner *in addition to* the weeks-behind count.
+//   - Behind (weeksBehind < 0) — amber.
+//   - Ahead or on pace (weeksBehind >= 0) — green.
+// ────────────────────────────────────────────────────────────────
+
+function StatusBadge({ captain: c }: { captain: ShoeClubCaptain }) {
   const label = paceLabel(c);
   if (c.isOverdue) {
     return (
-      <span className="inline-block bg-red-100 text-red-700 font-semibold text-[11px] px-2 py-0.5 rounded">
-        Overdue · {label}
-      </span>
+      <div className="flex flex-col gap-0.5">
+        <span className="pace-badge overdue inline-flex items-center gap-1 bg-red-600 text-white font-bold text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded w-fit">
+          <AlertTriangle className="w-3 h-3" />
+          Overdue — cycle ended
+        </span>
+        <span className="pace-badge text-red-700 font-semibold text-xs">
+          {label}
+        </span>
+      </div>
     );
   }
-  if (c.weeksBehind === 0) {
+  if (c.weeksBehind < 0) {
     return (
-      <span className="inline-block bg-brand-green/10 text-brand-green font-semibold text-[11px] px-2 py-0.5 rounded">
+      <span className="pace-badge inline-block bg-amber-100 text-amber-800 font-semibold text-[11px] px-2 py-0.5 rounded">
         {label}
       </span>
     );
   }
-  if (c.weeksBehind > 0) {
-    return (
-      <span className="inline-block bg-emerald-100 text-emerald-700 font-semibold text-[11px] px-2 py-0.5 rounded">
-        {label}
-      </span>
-    );
-  }
+  // Ahead or on pace.
   return (
-    <span className="inline-block bg-amber-100 text-amber-700 font-semibold text-[11px] px-2 py-0.5 rounded">
+    <span className="pace-badge inline-block bg-emerald-100 text-emerald-700 font-semibold text-[11px] px-2 py-0.5 rounded">
       {label}
     </span>
   );
