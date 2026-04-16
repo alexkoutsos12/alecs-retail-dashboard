@@ -70,6 +70,25 @@ export const appModules: AppModule[] = [
     ],
   },
   {
+    id: "shoe-clubs",
+    name: "Shoe Clubs",
+    description:
+      "Captain payment status from the RICS Captains List — who's on pace, behind, or done.",
+    firestoreModule: "shoe-clubs",
+    navItems: [
+      {
+        label: "Club Status",
+        href: "/shoe-clubs/club-status",
+        icon: "Users",
+      },
+      { label: "Import", href: "/shoe-clubs/import", icon: "Upload" },
+    ],
+    importRoute: "/shoe-clubs/import",
+    reportRoutes: [
+      { label: "Club Status →", href: "/shoe-clubs/club-status" },
+    ],
+  },
+  {
     id: "special-orders",
     name: "Special Orders",
     description:

@@ -38,6 +38,10 @@ interface ModuleStats {
   genderBreakdown: { mens: number; womens: number; childrens: number } | null;
   totalCustomers: number;
   totalOutstanding: number;
+  totalCaptains: number;
+  outstandingCount: number;
+  completedCount: number;
+  newClubCount: number;
 }
 
 function fmt(d: string) {
@@ -136,6 +140,10 @@ export default function HomePage() {
             genderBreakdown: data.genderBreakdown ?? null,
             totalCustomers: data.totalCustomers ?? 0,
             totalOutstanding: data.totalOutstanding ?? 0,
+            totalCaptains: data.totalCaptains ?? 0,
+            outstandingCount: data.outstandingCount ?? 0,
+            completedCount: data.completedCount ?? 0,
+            newClubCount: data.newClubCount ?? 0,
             lastImportDate: data.uploadedAt
               ? data.uploadedAt.toDate().toLocaleDateString("en-US", {
                   month: "2-digit",
@@ -202,6 +210,8 @@ export default function HomePage() {
                         <p>{stats.totalOutletItems} outlet items &middot; {stats.totalPerkItems} perk items &middot; Last import: {stats.lastImportDate}</p>
                       ) : mod.id === "special-orders" ? (
                         <p>{stats.totalOutstanding} outstanding item{stats.totalOutstanding === 1 ? "" : "s"} &middot; {stats.totalCustomers} customer{stats.totalCustomers === 1 ? "" : "s"} &middot; As of {stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}</p>
+                      ) : mod.id === "shoe-clubs" ? (
+                        <p>{stats.outstandingCount} outstanding &middot; {stats.completedCount} completed &middot; {stats.newClubCount} new &middot; As of {stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}</p>
                       ) : mod.id === "perk-inventory" ? (
                         <>
                           <p>{stats.totalSkus} active incentives &middot; As of {stats.importDate ? fmt(stats.importDate) : stats.lastImportDate}</p>
@@ -219,6 +229,8 @@ export default function HomePage() {
                         ? "No perk inventory imported yet."
                         : mod.id === "special-orders"
                         ? "No special orders imported yet."
+                        : mod.id === "shoe-clubs"
+                        ? "No captains list imported yet."
                         : "No data yet — import your first file"}
                     </p>
                   )}
