@@ -212,7 +212,8 @@ export function parseShoeClubs(csvContent: string): ShoeClubsResult {
     );
 
     // Weeks ahead/behind. Truncate toward zero so -0.3 is "on pace" and
-    // -1.5 is 1 week behind (not 2).
+    // -1.5 is 1 week behind (not 2). The report page softens the
+    // arithmetic visually by showing the Wk / 10 column as a decimal.
     let weeksBehind = 0;
     if (weeklyAmount > 0) {
       weeksBehind = Math.trunc((amountPaid - expectedPaid) / weeklyAmount);

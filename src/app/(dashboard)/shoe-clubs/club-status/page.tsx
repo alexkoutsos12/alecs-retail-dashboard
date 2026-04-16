@@ -59,9 +59,26 @@ function displayName(c: ShoeClubCaptain) {
   return `${last}, ${initial}`;
 }
 
-/** Week number out of 10 that the captain is currently in. */
-function currentWeekOf10(c: ShoeClubCaptain): number {
-  return Math.min(10, c.weeksElapsed + 1);
+/**
+ * Decimal progress through the 10-week cycle, measured from the club's
+ * start date to the report's "as of" date (stored importDate on the
+ * report doc). Capped at 10.0 and floored at 0.0. Displayed with one
+ * decimal so Wk and Paid visually reconcile — e.g. "Wk 8.3 / Paid 6 /
+ * 2 behind" reads as roughly 8 weeks in, 6 paid, ~2 short.
+ *
+ * We intentionally keep the truncation-friendly weeksBehind math the
+ * parser uses; the decimal is purely a display softener.
+ */
+function weeksElapsedDecimal(c: ShoeClubCaptain, asOfIso: string): number {
+  if (!c.clubStartDate || !asOfIso) return 0;
+  const start = new Date(`${c.clubStartDate}T00:00:00`);
+  const asOf = new Date(`${asOfIso}T00:00:00`);
+  const ms = asOf.getTime() - start.getTime();
+  if (!Number.isFinite(ms)) return 0;
+  const weeks = ms / (7 * 24 * 60 * 60 * 1000);
+  if (weeks <= 0) return 0;
+  if (weeks >= 10) return 10;
+  return weeks;
 }
 
 /** How many weekly installments have actually been paid. */
@@ -70,14 +87,15 @@ function weeksPaid(c: ShoeClubCaptain): number {
   return Math.max(0, Math.floor(c.amountPaid / c.weeklyAmount));
 }
 
-/** "3 weeks behind" / "2 weeks ahead" / "On pace". */
+/** "3 weeks behind" / "2 weeks ahead" / "On pace". Uses the parser's
+ * generous/trunc-toward-zero math stored on each captain. */
 function paceLabel(c: ShoeClubCaptain): string {
   if (c.weeksBehind === 0) return "On pace";
   if (c.weeksBehind > 0) {
     return `${c.weeksBehind} week${c.weeksBehind === 1 ? "" : "s"} ahead`;
   }
-  const n = -c.weeksBehind;
-  return `${n} week${n === 1 ? "" : "s"} behind`;
+  const behind = -c.weeksBehind;
+  return `${behind} week${behind === 1 ? "" : "s"} behind`;
 }
 
 // ─── Skeleton ───────────────────────────────────────────────────
@@ -424,7 +442,10 @@ export default function ClubStatusPage() {
         {groups.outstanding.length === 0 ? (
           <EmptyCard text="No active clubs with outstanding balances." />
         ) : (
-          <OutstandingTable captains={groups.outstanding} />
+          <OutstandingTable
+            captains={groups.outstanding}
+            asOfIso={report.importDate}
+          />
         )}
       </Section>
 
@@ -524,7 +545,13 @@ function EmptyCard({ text }: { text: string }) {
 
 // ─── Outstanding table ──────────────────────────────────────────
 
-function OutstandingTable({ captains }: { captains: ShoeClubCaptain[] }) {
+function OutstandingTable({
+  captains,
+  asOfIso,
+}: {
+  captains: ShoeClubCaptain[];
+  asOfIso: string;
+}) {
   return (
     <div className="club-card bg-white border-l-[3px] border-brand-green rounded overflow-hidden overflow-x-auto">
       <table className="w-full text-sm font-body min-w-[960px]">
@@ -572,7 +599,7 @@ function OutstandingTable({ captains }: { captains: ShoeClubCaptain[] }) {
                 {money(c.currentBalance)}
               </td>
               <td className="px-3 py-1.5 whitespace-nowrap text-center text-brand-text/70">
-                {currentWeekOf10(c)}
+                {weeksElapsedDecimal(c, asOfIso).toFixed(1)}
               </td>
               <td className="px-3 py-1.5 whitespace-nowrap text-center text-brand-text/70">
                 {weeksPaid(c)}
@@ -642,7 +669,7 @@ function CompletedTable({ captains }: { captains: ShoeClubCaptain[] }) {
                 {money(0)}
               </td>
               <td className="px-3 py-1.5 whitespace-nowrap text-center text-brand-text/70">
-                10
+                10.0
               </td>
               <td className="px-3 py-1.5 whitespace-nowrap text-center text-brand-text/70">
                 10
