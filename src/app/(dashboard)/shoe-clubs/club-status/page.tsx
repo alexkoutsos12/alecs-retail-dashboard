@@ -527,10 +527,11 @@ function EmptyCard({ text }: { text: string }) {
 function OutstandingTable({ captains }: { captains: ShoeClubCaptain[] }) {
   return (
     <div className="club-card bg-white border-l-[3px] border-brand-green rounded overflow-hidden overflow-x-auto">
-      <table className="w-full text-sm font-body min-w-[880px]">
+      <table className="w-full text-sm font-body min-w-[960px]">
         <thead>
           <tr className="border-b border-brand-cream-dark text-left text-brand-text/50 text-xs">
             <th className="px-3 py-2 font-normal">Captain</th>
+            <th className="px-3 py-2 font-normal">Account</th>
             <th className="px-3 py-2 font-normal">Phone</th>
             <th className="px-3 py-2 font-normal">Started</th>
             <th className="px-3 py-2 font-normal text-right">Total</th>
@@ -549,6 +550,9 @@ function OutstandingTable({ captains }: { captains: ShoeClubCaptain[] }) {
             >
               <td className="px-3 py-1.5 whitespace-nowrap font-medium">
                 {displayName(c)}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap font-mono text-xs text-brand-text/60">
+                {c.accountNumber}
               </td>
               <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/70 font-mono text-xs">
                 {c.phoneNumber || (
@@ -585,16 +589,27 @@ function OutstandingTable({ captains }: { captains: ShoeClubCaptain[] }) {
 }
 
 // ─── Completed table ────────────────────────────────────────────
+//
+// Mirrors the Outstanding layout so columns line up visually. Wk/10 and
+// Paid are always 10 for completed clubs, and Status shows a green
+// "Completed payment" badge.
 
 function CompletedTable({ captains }: { captains: ShoeClubCaptain[] }) {
   return (
     <div className="club-card bg-white border-l-[3px] border-brand-green rounded overflow-hidden overflow-x-auto">
-      <table className="w-full text-sm font-body min-w-[420px]">
+      <table className="w-full text-sm font-body min-w-[960px]">
         <thead>
           <tr className="border-b border-brand-cream-dark text-left text-brand-text/50 text-xs">
             <th className="px-3 py-2 font-normal">Captain</th>
+            <th className="px-3 py-2 font-normal">Account</th>
             <th className="px-3 py-2 font-normal">Phone</th>
-            <th className="px-3 py-2 font-normal text-right">Club Total</th>
+            <th className="px-3 py-2 font-normal">Started</th>
+            <th className="px-3 py-2 font-normal text-right">Total</th>
+            <th className="px-3 py-2 font-normal text-right">Weekly</th>
+            <th className="px-3 py-2 font-normal text-right">Balance</th>
+            <th className="px-3 py-2 font-normal text-center">Wk&nbsp;/&nbsp;10</th>
+            <th className="px-3 py-2 font-normal text-center">Paid</th>
+            <th className="px-3 py-2 font-normal">Status</th>
           </tr>
         </thead>
         <tbody>
@@ -606,13 +621,36 @@ function CompletedTable({ captains }: { captains: ShoeClubCaptain[] }) {
               <td className="px-3 py-1.5 whitespace-nowrap font-medium">
                 {displayName(c)}
               </td>
+              <td className="px-3 py-1.5 whitespace-nowrap font-mono text-xs text-brand-text/60">
+                {c.accountNumber}
+              </td>
               <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/70 font-mono text-xs">
                 {c.phoneNumber || (
                   <span className="text-brand-text/30">—</span>
                 )}
               </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/60">
+                {fmtDate(c.clubStartDate)}
+              </td>
               <td className="px-3 py-1.5 whitespace-nowrap text-right">
                 {money(c.clubTotal)}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right text-brand-text/60">
+                {money(c.weeklyAmount)}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-right text-brand-text/60">
+                {money(0)}
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-center text-brand-text/70">
+                10
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-center text-brand-text/70">
+                10
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap">
+                <span className="pace-badge inline-block bg-emerald-100 text-emerald-700 font-semibold text-[11px] px-2 py-0.5 rounded">
+                  Completed payment
+                </span>
               </td>
             </tr>
           ))}
@@ -623,19 +661,21 @@ function CompletedTable({ captains }: { captains: ShoeClubCaptain[] }) {
 }
 
 // ─── New-club table ─────────────────────────────────────────────
+//
+// New clubs show only captain, account number, phone, and the negative
+// balance — the start/total/weekly fields in the CSV still reflect the
+// *previous* cycle and would be misleading to display.
 
 function NewClubTable({ captains }: { captains: ShoeClubCaptain[] }) {
   return (
     <div className="club-card bg-white border-l-[3px] border-brand-green rounded overflow-hidden overflow-x-auto">
-      <table className="w-full text-sm font-body min-w-[620px]">
+      <table className="w-full text-sm font-body min-w-[480px]">
         <thead>
           <tr className="border-b border-brand-cream-dark text-left text-brand-text/50 text-xs">
             <th className="px-3 py-2 font-normal">Captain</th>
+            <th className="px-3 py-2 font-normal">Account</th>
             <th className="px-3 py-2 font-normal">Phone</th>
             <th className="px-3 py-2 font-normal text-right">Balance</th>
-            <th className="px-3 py-2 font-normal">Started</th>
-            <th className="px-3 py-2 font-normal text-right">Club Total</th>
-            <th className="px-3 py-2 font-normal text-right">Weekly</th>
           </tr>
         </thead>
         <tbody>
@@ -647,6 +687,9 @@ function NewClubTable({ captains }: { captains: ShoeClubCaptain[] }) {
               <td className="px-3 py-1.5 whitespace-nowrap font-medium">
                 {displayName(c)}
               </td>
+              <td className="px-3 py-1.5 whitespace-nowrap font-mono text-xs text-brand-text/60">
+                {c.accountNumber}
+              </td>
               <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/70 font-mono text-xs">
                 {c.phoneNumber || (
                   <span className="text-brand-text/30">—</span>
@@ -654,15 +697,6 @@ function NewClubTable({ captains }: { captains: ShoeClubCaptain[] }) {
               </td>
               <td className="px-3 py-1.5 whitespace-nowrap text-right text-sky-700 font-semibold">
                 {money(c.currentBalance)}
-              </td>
-              <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/60">
-                {fmtDate(c.clubStartDate)}
-              </td>
-              <td className="px-3 py-1.5 whitespace-nowrap text-right">
-                {money(c.clubTotal)}
-              </td>
-              <td className="px-3 py-1.5 whitespace-nowrap text-right text-brand-text/60">
-                {money(c.weeklyAmount)}
               </td>
             </tr>
           ))}
