@@ -285,26 +285,32 @@ export default function ClubStatusPage() {
             display: block !important;
           }
 
-          /* Section containers — keep the header with its first rows so
-             a section never starts alone at the bottom of a page. */
+          /* Section spacing + page breaks. Each category starts on its
+             own page (after the first, which starts right under the
+             report header). We do NOT use break-inside: avoid on the
+             section itself — an 80-row Outstanding table would be
+             pushed wholesale onto a fresh page, leaving page 1 blank. */
           .club-section {
-            break-inside: avoid-page;
-            page-break-inside: avoid;
-            margin-bottom: 10pt;
+            margin-bottom: 0 !important;
+          }
+          .club-section + .club-section {
+            break-before: page;
+            page-break-before: always;
           }
           .club-section h2 {
             break-after: avoid-page;
             page-break-after: avoid;
             color: black !important;
             font-size: 11pt !important;
-            margin: 6pt 0 3pt 0 !important;
+            margin: 0 0 3pt 0 !important;
           }
           .club-section .section-lead {
             break-after: avoid-page;
             page-break-after: avoid;
           }
 
-          /* Strip all decorative color/border treatments for print */
+          /* Strip decorative color/border, and — critically — turn off
+             the overflow container so scrollbars don't print. */
           .club-section .club-card {
             border: 1px solid #777 !important;
             border-left: 1px solid #777 !important;
@@ -312,6 +318,13 @@ export default function ClubStatusPage() {
             box-shadow: none !important;
             background: white !important;
             padding: 0 !important;
+            overflow: visible !important;
+          }
+          .club-section .club-card > * {
+            overflow: visible !important;
+          }
+          .club-section table {
+            min-width: 0 !important;
           }
 
           table {
