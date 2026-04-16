@@ -219,9 +219,12 @@ export function parseShoeClubs(csvContent: string): ShoeClubsResult {
       weeksBehind = Math.trunc((amountPaid - expectedPaid) / weeklyAmount);
     }
 
-    // The club cycle is a rolling ~10 weeks. Past that, a positive balance
-    // means the captain didn't finish paying within the cycle.
-    const isOverdue = weeksElapsed > 10 && currentBalance > 0;
+    // The club cycle runs 10 weeks. Once the full 10 have elapsed (day
+    // 70 and beyond), a positive balance means the captain didn't
+    // finish paying within the cycle — flag as overdue. `>=` is the
+    // right check: weeksBetween floors days/7, so weeksElapsed === 10
+    // already represents a cycle that hit or passed its end date.
+    const isOverdue = weeksElapsed >= 10 && currentBalance > 0;
 
     let category: ShoeClubCategory;
     if (currentBalance > 0) category = "outstanding";

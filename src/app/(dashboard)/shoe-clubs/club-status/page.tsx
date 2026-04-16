@@ -87,6 +87,16 @@ function weeksPaid(c: ShoeClubCaptain): number {
   return Math.max(0, Math.floor(c.amountPaid / c.weeklyAmount));
 }
 
+/**
+ * Overdue = the 10-week cycle has fully elapsed and the captain still
+ * owes money. We recompute here from the raw fields instead of reading
+ * `c.isOverdue` so the flag shows up correctly for reports imported
+ * before the parser fix — no reimport required.
+ */
+function isOverdueNow(c: ShoeClubCaptain, asOfIso: string): boolean {
+  return weeksElapsedDecimal(c, asOfIso) >= 10 && c.currentBalance > 0;
+}
+
 /** "3 weeks behind" / "2 weeks ahead" / "On pace". Uses the parser's
  * generous/trunc-toward-zero math stored on each captain. */
 function paceLabel(c: ShoeClubCaptain): string {
@@ -618,7 +628,7 @@ function OutstandingTable({
                 {weeksPaid(c)}
               </td>
               <td className="px-3 py-1.5 whitespace-nowrap">
-                <StatusBadge captain={c} />
+                <StatusBadge captain={c} asOfIso={asOfIso} />
               </td>
             </tr>
           ))}
@@ -755,9 +765,15 @@ function NewClubTable({ captains }: { captains: ShoeClubCaptain[] }) {
 //   - Ahead or on pace (weeksBehind >= 0) — green.
 // ────────────────────────────────────────────────────────────────
 
-function StatusBadge({ captain: c }: { captain: ShoeClubCaptain }) {
+function StatusBadge({
+  captain: c,
+  asOfIso,
+}: {
+  captain: ShoeClubCaptain;
+  asOfIso: string;
+}) {
   const label = paceLabel(c);
-  if (c.isOverdue) {
+  if (isOverdueNow(c, asOfIso)) {
     return (
       <div className="flex flex-col gap-0.5">
         <span className="pace-badge overdue inline-flex items-center gap-1 bg-red-600 text-white font-bold text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded w-fit">
