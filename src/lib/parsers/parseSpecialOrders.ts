@@ -257,7 +257,19 @@ export function parseSpecialOrders(buffer: ArrayBuffer): SpecialOrdersResult {
         ticket: effTicket,
       };
       if (!ordersBySku.has(sku)) ordersBySku.set(sku, []);
-      ordersBySku.get(sku)!.push(item);
+      // A "Special Order" row may have qty > 1 when the customer deposits
+      // multiple pairs of the same SKU on one ticket. RICS prints this as a
+      // single row (qty=N), and pickups come in as separate rows — so each
+      // unit must be tracked individually for FIFO net-outstanding math.
+      // SPECIAL custom items are already one row per unit, so qty is ignored
+      // for them.
+      const orderQty =
+        effType === "Special Order" && typeof qtyRaw === "number" && qtyRaw > 1
+          ? Math.floor(qtyRaw)
+          : 1;
+      for (let n = 0; n < orderQty; n++) {
+        ordersBySku.get(sku)!.push({ ...item });
+      }
     }
 
     // Net outstanding per SKU: drop the oldest N orders where N = pickups +
