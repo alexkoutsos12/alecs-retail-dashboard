@@ -34,6 +34,7 @@ const COL_WIDTH = 37;
 const COL_NAME = 9;
 const COL_TYPE = 41;
 const COL_QTY = 51;
+const COL_AMOUNT = 57;
 
 /** Title-case "MICHAEL MCGETTIGAN" -> "Michael Mcgettigan". */
 function titleCase(s: string): string {
@@ -152,6 +153,40 @@ export function parseSpecialOrders(buffer: ArrayBuffer): SpecialOrdersResult {
     const ordersBySku = new Map<string, OutstandingItem[]>();
     const decBySku = new Map<string, number>();
 
+    // Per-(originalTicket, sku) unit price, used to figure out how many units
+    // a Pickup row actually fulfilled. RICS prints partial pickups with an
+    // empty Quantity column, so the only reliable signal is amount ÷ per-unit
+    // price of the original Special Order row.
+    const unitPriceByTicketSku = new Map<string, number>();
+    const tsKey = (t: string, s: string) => `${t}::${s}`;
+
+    // For a Pickup row at index `i` and SKU `sku`, scan forward for the next
+    // "=== Previously Paid on <ticket> ===" line whose original (ticket+sku)
+    // we have recorded. Multi-SKU pickup tickets place continuation Pickup
+    // rows before their Previously Paid lines, so we walk past those; we
+    // stop only at the next dated row (a new transaction).
+    const findPickupUnitPrice = (i: number, sku: string): number | null => {
+      for (let j = i + 1; j < block.endRow; j++) {
+        const rr = rows[j];
+        if (!rr) continue;
+        if (String(rr[COL_ACCOUNT] ?? "").trim() === "Balance") break;
+        const dCell = rr[COL_DETAIL];
+        if (dCell != null && String(dCell).trim() !== "") {
+          const ds = String(dCell).trim();
+          if (!ds.startsWith("S.O.")) {
+            const pm = ds.match(/^=== Previously Paid on (\S+) ===/);
+            if (pm) {
+              const price = unitPriceByTicketSku.get(tsKey(pm[1], sku));
+              if (price && price > 0) return price;
+              continue;
+            }
+          }
+        }
+        if (rr[COL_DATE] instanceof Date) break;
+      }
+      return null;
+    };
+
     // Inheritance state for continuation rows.
     let lastDate: Date | null = null;
     let lastTicket = "";
@@ -226,7 +261,22 @@ export function parseSpecialOrders(buffer: ArrayBuffer): SpecialOrdersResult {
 
       // Pickup (either explicit type or inherited from continuation).
       if (effType === "Pickup") {
-        decBySku.set(detailStr, (decBySku.get(detailStr) || 0) + 1);
+        // RICS leaves the Quantity column blank on Pickup rows, so we infer
+        // how many units were picked from amount ÷ per-unit price of the
+        // matching original order. Falls back to 1 when we can't match,
+        // which preserves the prior behaviour for legacy / one-off cases.
+        const amountRaw = r[COL_AMOUNT];
+        const amount = typeof amountRaw === "number" ? amountRaw : 0;
+        let pickupQty = 1;
+        if (typeof qtyRaw === "number" && qtyRaw > 0) {
+          pickupQty = qtyRaw;
+        } else if (amount > 0) {
+          const unitPrice = findPickupUnitPrice(i, detailStr);
+          if (unitPrice && unitPrice > 0) {
+            pickupQty = Math.max(1, Math.round(amount / unitPrice));
+          }
+        }
+        decBySku.set(detailStr, (decBySku.get(detailStr) || 0) + pickupQty);
         continue;
       }
 
@@ -269,6 +319,14 @@ export function parseSpecialOrders(buffer: ArrayBuffer): SpecialOrdersResult {
           : 1;
       for (let n = 0; n < orderQty; n++) {
         ordersBySku.get(sku)!.push({ ...item });
+      }
+
+      // Record per-unit price so later Pickup rows can derive how many units
+      // they fulfilled. Keyed on (originalTicket, sku) to disambiguate
+      // multi-SKU Special Order tickets.
+      const amtRaw = r[COL_AMOUNT];
+      if (typeof amtRaw === "number" && amtRaw > 0 && effTicket && orderQty > 0) {
+        unitPriceByTicketSku.set(tsKey(effTicket, sku), amtRaw / orderQty);
       }
     }
 
