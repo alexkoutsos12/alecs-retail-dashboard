@@ -120,8 +120,15 @@ export async function parseSalesJournal(
         if (v === "Sold") map.sold = c;
       }
 
-      // Find item and salesperson columns from the first actual sale row
-      for (let j = i + 1; j < Math.min(sheetRows.length, i + 50); j++) {
+      // Find item and salesperson columns from the first actual sale row.
+      // Scan the WHOLE sheet, not just the next 50 rows: a large day-summary
+      // block (previous day's totals, tender/void summaries, batch header,
+      // donation / gift-card lines) can push the first real sale row well
+      // past the header. If we gave up early we'd silently fall back to the
+      // default item/salesperson columns, which are wrong for this layout —
+      // producing sales with a correct price/perk but blank SKU + salesperson.
+      let foundSaleRow = false;
+      for (let j = i + 1; j < sheetRows.length; j++) {
         const saleRow = sheetRows[j];
         if (!saleRow) continue;
         const c0 = saleRow[0] != null ? String(saleRow[0]).trim() : "";
@@ -140,7 +147,18 @@ export async function parseSalesJournal(
             break;
           }
         }
+        foundSaleRow = true;
         break;
+      }
+      // Guard: if a sheet has no detectable sale row, don't trust the header
+      // match either — the item/salesperson defaults would be guesses. The
+      // caller still gets a usable map, but we log so silent mis-parses like
+      // the blank-SKU/blank-salesperson bug surface during debugging.
+      if (!foundSaleRow) {
+        console.warn(
+          "detectColumns: header row found but no sale row detected; " +
+            "using default item/salesperson columns."
+        );
       }
       return map;
     }
