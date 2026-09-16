@@ -132,23 +132,6 @@ export function parseSpecialOrders(buffer: ArrayBuffer): SpecialOrdersResult {
   const customers: SpecialOrderCustomer[] = [];
 
   for (const block of blocks) {
-    // Look up whether row `i` is followed (skipping S.O. bookkeeping lines)
-    // by a "=== Previously Paid on <ticket> ===" line. If so, row `i` is a
-    // pickup event (the deposit from the prior ticket is being applied to
-    // this ring).
-    const followedByPreviouslyPaid = (i: number): boolean => {
-      for (let j = i + 1; j < block.endRow; j++) {
-        const r = rows[j];
-        if (!r) continue;
-        const d = r[COL_DETAIL];
-        if (d == null || String(d).trim() === "") continue;
-        const s = String(d).trim();
-        if (s.startsWith("S.O.")) continue; // skip deposit/payment lines
-        return /^=== Previously Paid on /.test(s);
-      }
-      return false;
-    };
-
     // Per-SKU ordered events, preserved in file order (FIFO by date).
     const ordersBySku = new Map<string, OutstandingItem[]>();
     const decBySku = new Map<string, number>();
@@ -215,12 +198,29 @@ export function parseSpecialOrders(buffer: ArrayBuffer): SpecialOrdersResult {
       if (detailStr.startsWith("===")) continue; // === Previously Paid on ... ===
 
       // Cancellation — "Cancel on <ticket> [<sku>]". RICS leaves the type
-      // column blank; the cancelled SKU is in brackets.
+      // column blank; the cancelled SKU is in brackets and the cancelled
+      // order's ticket follows "Cancel on". A cancel voids the entire order
+      // line, so when that line was for qty > 1 every unit must be removed —
+      // derive the count from the refund amount ÷ the order's per-unit price
+      // (same approach as pickups), defaulting to 1 when we can't match.
       if (/^Cancel on /i.test(detailStr)) {
-        const m = detailStr.match(/\[([^\]]+)\]/);
-        if (m) {
-          const sku = m[1];
-          decBySku.set(sku, (decBySku.get(sku) || 0) + 1);
+        const skuMatch = detailStr.match(/\[([^\]]+)\]/);
+        const ticketMatch = detailStr.match(/^Cancel on\s+(\S+)/i);
+        if (skuMatch) {
+          const sku = skuMatch[1];
+          const cancelAmtRaw = r[COL_AMOUNT];
+          const cancelAmt =
+            typeof cancelAmtRaw === "number" ? cancelAmtRaw : 0;
+          let cancelQty = 1;
+          if (ticketMatch && cancelAmt > 0) {
+            const unitPrice = unitPriceByTicketSku.get(
+              tsKey(ticketMatch[1], sku)
+            );
+            if (unitPrice && unitPrice > 0) {
+              cancelQty = Math.max(1, Math.round(cancelAmt / unitPrice));
+            }
+          }
+          decBySku.set(sku, (decBySku.get(sku) || 0) + cancelQty);
         }
         continue;
       }
@@ -240,14 +240,6 @@ export function parseSpecialOrders(buffer: ArrayBuffer): SpecialOrdersResult {
         // New dated row — update inheritance state.
         lastDate = effDate;
         lastTicket = effTicket;
-
-        // A dated row with an empty type cell but followed by "=== Previously
-        // Paid on <ticket> ===" is a SPECIAL pickup/re-ring event. Regular
-        // pickups always have type="Pickup" in the column, so this case only
-        // fires for SPECIAL custom items.
-        if (effType === "" && followedByPreviouslyPaid(i)) {
-          effType = "Pickup";
-        }
         lastType = effType;
       } else {
         // Continuation row on a multi-item ticket — inherit from the most
@@ -257,6 +249,21 @@ export function parseSpecialOrders(buffer: ArrayBuffer): SpecialOrdersResult {
         effDate = lastDate;
         effTicket = lastTicket;
         if (effType === "") effType = lastType;
+      }
+
+      // SPECIAL custom items: the original order line always carries a
+      // quantity, while RICS re-rings the custom line with no quantity when it
+      // is picked up. Classify purely on quantity — this detects the pickup
+      // even when several SPECIAL lines are rung on one ticket (each matched by
+      // its own "Previously Paid" line further down) or when the pickup is a
+      // continuation row. The previous approach keyed off an immediately
+      // adjacent "Previously Paid" line and so missed batched / continuation
+      // pickups, leaving already-picked customs on the report.
+      if (detailStr === "SPECIAL") {
+        effType =
+          typeof qtyRaw === "number" && qtyRaw > 0 ? "Special Order" : "Pickup";
+        // Keep inheritance consistent for any continuation row that follows.
+        if (dateRaw instanceof Date) lastType = effType;
       }
 
       // Pickup (either explicit type or inherited from continuation).
@@ -280,24 +287,11 @@ export function parseSpecialOrders(buffer: ArrayBuffer): SpecialOrdersResult {
         continue;
       }
 
-      // Order detection.
-      let isOrder = false;
-      let sku = detailStr;
-      if (effType === "Special Order") {
-        isOrder = true;
-      } else if (
-        detailStr === "SPECIAL" &&
-        effType === "" &&
-        typeof qtyRaw === "number" &&
-        qtyRaw > 0
-      ) {
-        // Custom SPECIAL item. Only count as a new order when qty is
-        // present — a qty-less SPECIAL line is a pickup/re-ring event and
-        // was already converted above via followedByPreviouslyPaid().
-        isOrder = true;
-        sku = "SPECIAL";
-      }
-      if (!isOrder) continue;
+      // Order detection. SPECIAL customs were normalised to "Special Order"
+      // above when they carry a quantity, so this single check covers both
+      // catalogue SKUs and custom items.
+      const sku = detailStr;
+      if (effType !== "Special Order") continue;
 
       const item: OutstandingItem = {
         sku,
