@@ -91,6 +91,12 @@ interface MonthGroup {
   total: number;
   count: number;
 }
+interface YearGroup {
+  year: string;
+  months: MonthGroup[];
+  total: number;
+  count: number;
+}
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -176,6 +182,7 @@ export default function SeniorDiscountSummaryPage() {
   const [filterStart, setFilterStart] = useState("");
   const [filterEnd, setFilterEnd] = useState("");
 
+  const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
 
@@ -212,37 +219,53 @@ export default function SeniorDiscountSummaryPage() {
     return result;
   }, [lines, view, filterStart, filterEnd]);
 
-  const months = useMemo<MonthGroup[]>(() => {
-    const monthMap = new Map<string, Map<string, DiscountLine[]>>();
+  const years = useMemo<YearGroup[]>(() => {
+    const yearMap = new Map<
+      string,
+      Map<string, Map<string, DiscountLine[]>>
+    >();
     for (const l of viewLines) {
       if (!l.date) continue;
+      const yKey = l.date.slice(0, 4);
       const mKey = l.date.slice(0, 7);
+      if (!yearMap.has(yKey)) yearMap.set(yKey, new Map());
+      const monthMap = yearMap.get(yKey)!;
       if (!monthMap.has(mKey)) monthMap.set(mKey, new Map());
       const dayMap = monthMap.get(mKey)!;
       if (!dayMap.has(l.date)) dayMap.set(l.date, []);
       dayMap.get(l.date)!.push(l);
     }
-    return [...monthMap.entries()]
-      .map(([month, dayMap]) => {
-        const days: DayGroup[] = [...dayMap.entries()]
-          .map(([day, dayLines]) => ({
-            day,
-            lines: [...dayLines].sort((a, b) =>
-              a.time !== b.time
-                ? a.time.localeCompare(b.time)
-                : a.ticketNumber.localeCompare(b.ticketNumber)
-            ),
-            total: dayLines.reduce((s, l) => s + l.discountAmount, 0),
-          }))
-          .sort((a, b) => a.day.localeCompare(b.day));
+    return [...yearMap.entries()]
+      .map(([year, monthMap]) => {
+        const months: MonthGroup[] = [...monthMap.entries()]
+          .map(([month, dayMap]) => {
+            const days: DayGroup[] = [...dayMap.entries()]
+              .map(([day, dayLines]) => ({
+                day,
+                lines: [...dayLines].sort((a, b) =>
+                  a.time !== b.time
+                    ? a.time.localeCompare(b.time)
+                    : a.ticketNumber.localeCompare(b.ticketNumber)
+                ),
+                total: dayLines.reduce((s, l) => s + l.discountAmount, 0),
+              }))
+              .sort((a, b) => a.day.localeCompare(b.day));
+            return {
+              month,
+              days,
+              total: days.reduce((s, d) => s + d.total, 0),
+              count: days.reduce((s, d) => s + d.lines.length, 0),
+            };
+          })
+          .sort((a, b) => a.month.localeCompare(b.month));
         return {
-          month,
-          days,
-          total: days.reduce((s, d) => s + d.total, 0),
-          count: days.reduce((s, d) => s + d.lines.length, 0),
+          year,
+          months,
+          total: months.reduce((s, m) => s + m.total, 0),
+          count: months.reduce((s, m) => s + m.count, 0),
         };
       })
-      .sort((a, b) => a.month.localeCompare(b.month));
+      .sort((a, b) => a.year.localeCompare(b.year));
   }, [viewLines]);
 
   const viewTotal = viewLines.reduce((s, l) => s + l.discountAmount, 0);
@@ -302,7 +325,8 @@ export default function SeniorDiscountSummaryPage() {
         const dates = merged.map((l) => l.date).filter(Boolean).sort();
         setFilterStart(dates[0] ?? "");
         setFilterEnd(dates[dates.length - 1] ?? "");
-        // Start fully collapsed — months only; the user drills in.
+        // Default: years expanded to show months; days/transactions collapsed.
+        setExpandedYears(new Set(merged.map((l) => l.date.slice(0, 4))));
         setExpandedMonths(new Set());
         setExpandedDays(new Set());
 
@@ -353,6 +377,13 @@ export default function SeniorDiscountSummaryPage() {
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
 
+  const toggleYear = (key: string) =>
+    setExpandedYears((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   const toggleMonth = (key: string) =>
     setExpandedMonths((prev) => {
       const next = new Set(prev);
@@ -370,12 +401,13 @@ export default function SeniorDiscountSummaryPage() {
 
   const exportCSV = () => {
     const header = [
-      "Category", "Month", "Date", "Time", "Ticket#", "Cashier", "SKU",
+      "Category", "Year", "Month", "Date", "Time", "Ticket#", "Cashier", "SKU",
       "ProductName", "Size", "Retail", "SalePrice", "DiscountPct",
       "DiscountAmount",
     ];
     const rows = viewLines.map((l) => [
       CATEGORY_LABEL[l.category],
+      l.date.slice(0, 4),
       monthLabel(l.date.slice(0, 7)),
       l.date,
       l.time,
@@ -611,14 +643,16 @@ export default function SeniorDiscountSummaryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {months.map((mo) => (
-                    <MonthRows
-                      key={mo.month}
-                      mo={mo}
-                      monthOpen={expandedMonths.has(mo.month)}
+                  {years.map((yr) => (
+                    <YearRows
+                      key={yr.year}
+                      yr={yr}
+                      yearOpen={expandedYears.has(yr.year)}
+                      expandedMonths={expandedMonths}
                       expandedDays={expandedDays}
                       detailHeaders={detailHeaders}
                       showCategory={showCategory}
+                      onToggleYear={toggleYear}
                       onToggleMonth={toggleMonth}
                       onToggleDay={toggleDay}
                     />
@@ -645,12 +679,17 @@ export default function SeniorDiscountSummaryPage() {
           {/* Print-only layout */}
           {!noData && (
             <div className="hidden print:block">
-              {months.map((mo) => (
-                <div key={mo.month} className="mb-8">
-                  <h3 className="font-heading font-bold text-base mb-2 border-b border-gray-300 pb-1">
-                    {monthLabel(mo.month)} — {fmtMoney(mo.total)} ({mo.count}{" "}
-                    lines)
-                  </h3>
+              {years.map((yr) => (
+                <div key={yr.year} className="mb-10">
+                  <h2 className="font-heading font-bold text-lg mb-3 border-b-2 border-gray-400 pb-1">
+                    {yr.year} — {fmtMoney(yr.total)} ({yr.count} lines)
+                  </h2>
+                  {yr.months.map((mo) => (
+                    <div key={mo.month} className="mb-8 pl-2">
+                      <h3 className="font-heading font-bold text-base mb-2 border-b border-gray-300 pb-1">
+                        {monthLabel(mo.month)} — {fmtMoney(mo.total)} ({mo.count}{" "}
+                        lines)
+                      </h3>
                   {mo.days.map((d) => (
                     <div key={d.day} className="mb-3">
                       <p className="text-sm font-bold">
@@ -699,6 +738,8 @@ export default function SeniorDiscountSummaryPage() {
                           ))}
                         </tbody>
                       </table>
+                        </div>
+                      ))}
                     </div>
                   ))}
                 </div>
@@ -722,7 +763,65 @@ export default function SeniorDiscountSummaryPage() {
   );
 }
 
-// ─── Month + Day rows ────────────────────────────────────────────────────────
+// ─── Year + Month + Day rows ─────────────────────────────────────────────────
+
+function YearRows({
+  yr,
+  yearOpen,
+  expandedMonths,
+  expandedDays,
+  detailHeaders,
+  showCategory,
+  onToggleYear,
+  onToggleMonth,
+  onToggleDay,
+}: {
+  yr: YearGroup;
+  yearOpen: boolean;
+  expandedMonths: Set<string>;
+  expandedDays: Set<string>;
+  detailHeaders: string[];
+  showCategory: boolean;
+  onToggleYear: (key: string) => void;
+  onToggleMonth: (key: string) => void;
+  onToggleDay: (key: string) => void;
+}) {
+  return (
+    <>
+      <tr
+        onClick={() => onToggleYear(yr.year)}
+        className="cursor-pointer hover:bg-brand-cream/50 border-b border-brand-cream transition-colors"
+      >
+        <td className="px-3 py-3 text-brand-text/30">
+          <ChevronRight
+            className={`w-4 h-4 transition-transform duration-150 ${
+              yearOpen ? "rotate-90" : ""
+            }`}
+          />
+        </td>
+        <td className="px-3 py-3 font-heading font-bold text-brand-green">
+          {yr.year}
+        </td>
+        <td className="px-3 py-3 font-bold">{yr.count}</td>
+        <td className="px-3 py-3 font-bold">{fmtMoney(yr.total)}</td>
+      </tr>
+
+      {yearOpen &&
+        yr.months.map((mo) => (
+          <MonthRows
+            key={mo.month}
+            mo={mo}
+            monthOpen={expandedMonths.has(mo.month)}
+            expandedDays={expandedDays}
+            detailHeaders={detailHeaders}
+            showCategory={showCategory}
+            onToggleMonth={onToggleMonth}
+            onToggleDay={onToggleDay}
+          />
+        ))}
+    </>
+  );
+}
 
 function MonthRows({
   mo,
@@ -745,9 +844,9 @@ function MonthRows({
     <>
       <tr
         onClick={() => onToggleMonth(mo.month)}
-        className="cursor-pointer hover:bg-brand-cream/50 border-b border-brand-cream transition-colors"
+        className="cursor-pointer hover:bg-brand-cream/40 border-b border-brand-cream transition-colors"
       >
-        <td className="px-3 py-3 text-brand-text/30">
+        <td className="pl-8 pr-3 py-3 text-brand-text/30">
           <ChevronRight
             className={`w-4 h-4 transition-transform duration-150 ${
               monthOpen ? "rotate-90" : ""
@@ -793,7 +892,7 @@ function DayRows({
         onClick={() => onToggleDay(d.day)}
         className="cursor-pointer hover:bg-brand-cream/40 border-b border-brand-cream transition-colors bg-brand-cream/20"
       >
-        <td className="py-2.5 pl-8 pr-3 text-brand-text/30">
+        <td className="py-2.5 pl-16 pr-3 text-brand-text/30">
           <ChevronRight
             className={`w-3.5 h-3.5 transition-transform duration-150 ${
               dayOpen ? "rotate-90" : ""
@@ -815,7 +914,7 @@ function DayRows({
                     {detailHeaders.map((h, i) => (
                       <th
                         key={h}
-                        className={`${i === 0 ? "pl-14 pr-3" : "px-3"} py-2 font-normal text-left`}
+                        className={`${i === 0 ? "pl-24 pr-3" : "px-3"} py-2 font-normal text-left`}
                       >
                         {h}
                       </th>
@@ -829,11 +928,11 @@ function DayRows({
                       className={idx % 2 === 0 ? "bg-white" : "bg-brand-cream/30"}
                     >
                       {showCategory && (
-                        <td className="pl-14 pr-3 py-1.5">
+                        <td className="pl-24 pr-3 py-1.5">
                           {CATEGORY_LABEL[l.category]}
                         </td>
                       )}
-                      <td className={`${showCategory ? "px-3" : "pl-14 pr-3"} py-1.5`}>
+                      <td className={`${showCategory ? "px-3" : "pl-24 pr-3"} py-1.5`}>
                         {l.time}
                       </td>
                       <td className="px-3 py-1.5">{l.ticketNumber}</td>
