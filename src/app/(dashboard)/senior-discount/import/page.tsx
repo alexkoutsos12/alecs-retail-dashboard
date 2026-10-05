@@ -32,8 +32,8 @@ import {
   deleteObject,
 } from "firebase/storage";
 import {
-  parseSeniorDiscount,
-  SeniorDiscountLine,
+  parseDiscountAnalysis,
+  DiscountAnalysis,
 } from "@/lib/parsers/parseSeniorDiscount";
 
 const MODULE = "senior-discount";
@@ -44,8 +44,9 @@ interface ReportDoc {
   id: string;
   filename: string;
   dateRange: { start: string; end: string };
-  totalTransactions: number; // senior-discount lines (used by ImportSelector)
+  totalTransactions: number; // discounted lines (used by ImportSelector)
   totalSeniorDollars: number;
+  totalNonSeniorDollars: number;
   uploadedBy: string;
   uploadedByName: string;
   uploadedAt: { toDate: () => Date } | null;
@@ -57,6 +58,8 @@ interface SuccessData {
   dateRange: { start: string; end: string };
   totalLines: number;
   totalSeniorDollars: number;
+  totalNonSeniorDollars: number;
+  reportedTotalDiscount: number | null;
 }
 
 function formatDate(dateStr: string): string {
@@ -173,15 +176,16 @@ export default function SeniorDiscountImportPage() {
       const docRef = doc(collection(db, "reports"));
       const reportId = docRef.id;
 
-      const lines: SeniorDiscountLine[] = await parseSeniorDiscount(
+      const analysis: DiscountAnalysis = await parseDiscountAnalysis(
         buffer,
         reportId,
         (current, total) => setParseProgress({ current, total })
       );
+      const lines = analysis.lines;
 
       if (lines.length === 0) {
         throw new Error(
-          "No senior-discount transactions found in this file. Make sure it is a RICS Sales Journal (.xlsx)."
+          "No discounted transactions found in this file. Make sure it is a RICS Sales Journal (.xlsx)."
         );
       }
 
@@ -193,14 +197,16 @@ export default function SeniorDiscountImportPage() {
 
       if (!dateRange.start || !dateRange.end) {
         throw new Error(
-          "Could not determine a date range from the qualifying transactions."
+          "Could not determine a date range from the transactions."
         );
       }
 
-      const totalSeniorDollars = lines.reduce(
-        (s, l) => s + l.discountAmount,
-        0
-      );
+      const totalSeniorDollars = lines
+        .filter((l) => l.category === "senior")
+        .reduce((s, l) => s + l.discountAmount, 0);
+      const totalNonSeniorDollars = lines
+        .filter((l) => l.category !== "senior")
+        .reduce((s, l) => s + l.discountAmount, 0);
 
       // Find overlapping existing imports (same date-range overlap rule as
       // the Perk Tracker so a re-import of the same month replaces the old).
@@ -229,7 +235,7 @@ export default function SeniorDiscountImportPage() {
           }
 
           const storagePath = `reports/${reportId}/senior-discount.json`;
-          const jsonBlob = new Blob([JSON.stringify(lines)], {
+          const jsonBlob = new Blob([JSON.stringify(analysis)], {
             type: "application/json",
           });
           await uploadBytes(storageRef(storage, storagePath), jsonBlob);
@@ -240,6 +246,8 @@ export default function SeniorDiscountImportPage() {
             dateRange,
             totalTransactions: lines.length,
             totalSeniorDollars,
+            totalNonSeniorDollars,
+            reportedTotalDiscount: analysis.reportedTotalDiscount,
             uploadedBy: user.uid,
             uploadedByName: user.displayName || user.email || "Unknown",
             uploadedAt: serverTimestamp(),
@@ -251,6 +259,8 @@ export default function SeniorDiscountImportPage() {
             dateRange,
             totalLines: lines.length,
             totalSeniorDollars,
+            totalNonSeniorDollars,
+            reportedTotalDiscount: analysis.reportedTotalDiscount,
           });
           setImportState("success");
           toast.success("Report imported successfully.");
@@ -500,13 +510,42 @@ export default function SeniorDiscountImportPage() {
               )}`}
             />
             <SummaryRow
-              label="Qualifying Senior Lines (~10% off, non-perked)"
+              label="Discounted Lines Found"
               value={String(successData.totalLines)}
             />
             <SummaryRow
-              label="Estimated Senior Discount $"
+              label="Estimated Senior Discount (~10%, non-perked)"
               value={fmtMoney(successData.totalSeniorDollars)}
             />
+            <SummaryRow
+              label="Other (Non-Senior) Discounts"
+              value={fmtMoney(successData.totalNonSeniorDollars)}
+            />
+            <SummaryRow
+              label="Parsed Total Discount"
+              value={fmtMoney(
+                successData.totalSeniorDollars +
+                  successData.totalNonSeniorDollars
+              )}
+            />
+            <SummaryRow
+              label="Report's Total Discount (Store Totals)"
+              value={
+                successData.reportedTotalDiscount != null
+                  ? fmtMoney(successData.reportedTotalDiscount)
+                  : "—"
+              }
+            />
+            {successData.reportedTotalDiscount != null && (
+              <SummaryRow
+                label="Unreconciled (ticket-level / layaway)"
+                value={fmtMoney(
+                  successData.reportedTotalDiscount -
+                    (successData.totalSeniorDollars +
+                      successData.totalNonSeniorDollars)
+                )}
+              />
+            )}
           </div>
           <div className="flex flex-wrap gap-3 items-center">
             <Link
@@ -567,8 +606,9 @@ export default function SeniorDiscountImportPage() {
                   <th className="px-4 py-2 font-normal">Filename</th>
                   <th className="px-4 py-2 font-normal">Uploaded By</th>
                   <th className="px-4 py-2 font-normal">Date Range</th>
-                  <th className="px-4 py-2 font-normal">Senior Lines</th>
+                  <th className="px-4 py-2 font-normal">Lines</th>
                   <th className="px-4 py-2 font-normal">Senior $</th>
+                  <th className="px-4 py-2 font-normal">Other $</th>
                   <th className="px-4 py-2 font-normal">Uploaded At</th>
                   <th className="px-4 py-2 font-normal w-8"></th>
                 </tr>
@@ -594,6 +634,9 @@ export default function SeniorDiscountImportPage() {
                       <td className="px-4 py-2">{row.totalTransactions}</td>
                       <td className="px-4 py-2">
                         {fmtMoney(row.totalSeniorDollars ?? 0)}
+                      </td>
+                      <td className="px-4 py-2">
+                        {fmtMoney(row.totalNonSeniorDollars ?? 0)}
                       </td>
                       <td className="px-4 py-2 whitespace-nowrap">
                         {row.uploadedAt

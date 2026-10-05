@@ -1,30 +1,39 @@
+import * as XLSX from "xlsx";
 import { parseSalesJournal } from "./parseSalesJournal";
 
 /**
- * Senior Discount parser.
+ * Discount analysis for the Senior Discount module.
  *
  * Alec's offers a 10% senior citizen discount. In the RICS Sales Journal a
  * senior discount is recorded exactly like any other markdown, so there is no
- * explicit flag to key off. We approximate the senior-discount total by
- * elimination:
+ * explicit flag. We approximate the senior-discount total by elimination and
+ * classify every discounted line into a category so the result can be
+ * reconciled against the report's own total discount figure:
  *
- *   1. Omit every *perked* line. The Perks column marks discounted
- *      merchandise — outlet items ($1) and employee payable perks ($2+). None
- *      of those are senior discounts. (Returns of perked items carry a
- *      negative perk and are excluded here too.)
- *   2. Of the remaining full-service lines, keep only those discounted by
- *      (almost) exactly 10%. A full-service item marked down by some other
- *      percentage is a sale-tag markdown, not a senior discount.
+ *   - outlet:   perked line with a $1 marker (outlet merchandise).
+ *   - perk:     perked line with a $2+ marker (employee payable perk).
+ *   - senior:   non-perked sale discounted by (almost) exactly 10%.
+ *   - markdown: non-perked sale discounted by some other percentage
+ *               (a full-service sale-tag markdown).
+ *   - return:   a Return line (negative discount) — excluded from the senior
+ *               figure, but kept so the totals reconcile.
  *
- * The unavoidable flaw: a full-service item marked down by ~10% with a sale
- * tag is indistinguishable from a senior discount and will be counted. Over a
- * month this yields a representative figure within a small margin of error.
- *
- * Returns are ignored entirely — this reports discounts *given*, not net of
- * returns.
+ * Known, unavoidable limits (surfaced by the reconciliation view):
+ *   - A full-service item marked down ~10% is indistinguishable from a senior
+ *     discount and is counted as senior.
+ *   - A tiny amount of discount is applied at the ticket level (not on any
+ *     line) and Layaway Sales are not read by the shared sales-journal parser;
+ *     both show up as the small "unreconciled" remainder.
  */
 
-export interface SeniorDiscountLine {
+export type DiscountCategory =
+  | "senior"
+  | "outlet"
+  | "perk"
+  | "markdown"
+  | "return";
+
+export interface DiscountLine {
   id: string;
   date: string; // YYYY-MM-DD
   time: string; // HH:MM AM/PM
@@ -36,8 +45,20 @@ export interface SeniorDiscountLine {
   size: string;
   retailPrice: number; // per unit
   salePrice: number; // per unit
-  discountAmount: number; // line total discounted (Markdown column)
+  discountAmount: number; // line total discounted (Markdown column; negative on returns)
   discountPct: number; // fraction, e.g. 0.1 for 10%
+  category: DiscountCategory;
+}
+
+export interface DiscountAnalysis {
+  lines: DiscountLine[];
+  /**
+   * The report's own total discount, read from the "Store Totals" grand-total
+   * row (or the summed "Date Totals" rows as a fallback). Null when the file
+   * carries no such summary row. Used to reconcile against the sum of the
+   * parsed line discounts.
+   */
+  reportedTotalDiscount: number | null;
 }
 
 /** The senior discount rate (10%). */
@@ -46,41 +67,108 @@ export const SENIOR_RATE = 0.1;
 /**
  * How far from exactly 10% a line's discount may fall and still count as a
  * senior discount. ±0.1% captures cent-rounding on a true 10% markdown while
- * excluding genuine sale-tag markdowns that land nearby. Widen this to catch
- * more rounding at the cost of sweeping in more real markdowns.
+ * excluding genuine sale-tag markdowns that land nearby.
  */
 export const SENIOR_TOLERANCE = 0.001;
 
-/**
- * Transaction types that can carry a senior discount. Returns are excluded on
- * purpose — see the module note above.
- */
-const SENIOR_TYPES = new Set(["Regular Sale", "Special Order Pickup"]);
+/** Backwards-compatible alias — a senior line is just a DiscountLine. */
+export type SeniorDiscountLine = DiscountLine;
 
-export async function parseSeniorDiscount(
+function classify(
+  transactionType: string,
+  perks: number,
+  retailPrice: number,
+  salePrice: number
+): DiscountCategory {
+  if (transactionType === "Return") return "return";
+  if (perks === 1) return "outlet";
+  if (perks !== 0) return "perk"; // $2+ payable perk (any other nonzero marker)
+  // Non-perked sale carrying a discount.
+  if (retailPrice > 0 && salePrice < retailPrice) {
+    const pct = (retailPrice - salePrice) / retailPrice;
+    if (Math.abs(pct - SENIOR_RATE) <= SENIOR_TOLERANCE) return "senior";
+  }
+  return "markdown";
+}
+
+/**
+ * Read the report's own total discount from the summary rows. Prefers the
+ * single "Store Totals" grand-total row; falls back to summing the per-day
+ * "Date Totals" rows; returns null if neither is present.
+ */
+function extractReportedTotalDiscount(buffer: ArrayBuffer): number | null {
+  const wb = XLSX.read(buffer, { type: "array" });
+
+  let storeTotal = 0;
+  let foundStore = false;
+  let dateTotal = 0;
+  let foundDate = false;
+
+  for (const name of wb.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json<(string | number | null)[]>(
+      wb.Sheets[name],
+      { header: 1, defval: null }
+    );
+
+    // Find the Markdown column from the header row.
+    let mdCol = -1;
+    for (let i = 0; i < Math.min(rows.length, 40) && mdCol === -1; i++) {
+      const row = rows[i];
+      if (!row) continue;
+      for (let c = 0; c < 40; c++) {
+        if (row[c] != null && String(row[c]).trim() === "Markdown") {
+          mdCol = c;
+          break;
+        }
+      }
+    }
+    if (mdCol === -1) continue;
+
+    for (const row of rows) {
+      if (!row) continue;
+      const label = row[0] != null ? String(row[0]).trim() : "";
+      const val = row[mdCol];
+      if (typeof val !== "number") continue;
+      if (label === "Store Totals") {
+        storeTotal += val;
+        foundStore = true;
+      } else if (label === "Date Totals") {
+        dateTotal += val;
+        foundDate = true;
+      }
+    }
+  }
+
+  if (foundStore) return storeTotal;
+  if (foundDate) return dateTotal;
+  return null;
+}
+
+/**
+ * Parse a RICS Sales Journal into a full discount analysis — every discounted
+ * line categorized, plus the report's own total discount for reconciliation.
+ */
+export async function parseDiscountAnalysis(
   buffer: ArrayBuffer,
   reportId: string,
   onProgress?: (current: number, total: number) => void
-): Promise<SeniorDiscountLine[]> {
+): Promise<DiscountAnalysis> {
   const transactions = await parseSalesJournal(buffer, reportId, onProgress);
 
-  const lines: SeniorDiscountLine[] = [];
+  const lines: DiscountLine[] = [];
   for (const t of transactions) {
-    // Sales only — ignore returns.
-    if (!SENIOR_TYPES.has(t.transactionType)) continue;
-    // Any perk at all (outlet $1, payable $2+, or a negative perk on a
-    // perked return) means this is discounted merchandise, not senior.
-    if (t.perks !== 0) continue;
-    // Must be a real discount off a real retail price.
-    if (t.retailPrice <= 0 || t.salePrice >= t.retailPrice) continue;
+    // Only lines that actually carry a discount (positive markdown on a sale,
+    // negative on a return). A full-price line has markdown 0 and is skipped.
+    if (!t.markdown || t.markdown === 0) continue;
 
-    const discountPct = (t.retailPrice - t.salePrice) / t.retailPrice;
-    if (Math.abs(discountPct - SENIOR_RATE) > SENIOR_TOLERANCE) continue;
-
-    // The Markdown column is already the line total discounted (across
-    // quantity). Fall back to the per-unit delta if it is missing.
-    const discountAmount =
-      t.markdown > 0 ? t.markdown : t.retailPrice - t.salePrice;
+    const category = classify(
+      t.transactionType,
+      t.perks,
+      t.retailPrice,
+      t.salePrice
+    );
+    const discountPct =
+      t.retailPrice > 0 ? (t.retailPrice - t.salePrice) / t.retailPrice : 0;
 
     lines.push({
       id: t.id,
@@ -94,10 +182,14 @@ export async function parseSeniorDiscount(
       size: t.size,
       retailPrice: t.retailPrice,
       salePrice: t.salePrice,
-      discountAmount,
+      discountAmount: t.markdown,
       discountPct,
+      category,
     });
   }
 
-  return lines;
+  return {
+    lines,
+    reportedTotalDiscount: extractReportedTotalDiscount(buffer),
+  };
 }
