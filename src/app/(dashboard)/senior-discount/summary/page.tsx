@@ -302,7 +302,8 @@ export default function SeniorDiscountSummaryPage() {
         const dates = merged.map((l) => l.date).filter(Boolean).sort();
         setFilterStart(dates[0] ?? "");
         setFilterEnd(dates[dates.length - 1] ?? "");
-        setExpandedMonths(new Set(merged.map((l) => l.date.slice(0, 7))));
+        // Start fully collapsed — months only; the user drills in.
+        setExpandedMonths(new Set());
         setExpandedDays(new Set());
 
         setDataLoaded(true);
