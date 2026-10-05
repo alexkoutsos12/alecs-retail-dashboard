@@ -108,6 +108,25 @@ export const appModules: AppModule[] = [
     ],
   },
   {
+    id: "senior-discount",
+    name: "Senior Discount",
+    description:
+      "Estimated senior citizen discount dollars from the RICS Sales Journal — perked items and non-10% markdowns excluded.",
+    firestoreModule: "senior-discount",
+    navItems: [
+      {
+        label: "Discount Summary",
+        href: "/senior-discount/summary",
+        icon: "Percent",
+      },
+      { label: "Import", href: "/senior-discount/import", icon: "Upload" },
+    ],
+    importRoute: "/senior-discount/import",
+    reportRoutes: [
+      { label: "Discount Summary →", href: "/senior-discount/summary" },
+    ],
+  },
+  {
     id: "perk-inventory",
     name: "Perk Inventory",
     description:
