@@ -275,9 +275,17 @@ export default function SeniorDiscountSummaryPage() {
             if (!res.ok)
               throw new Error(`Download failed (HTTP ${res.status})`);
             const raw = await res.json();
-            // Tolerate the earlier array-only storage shape.
+            // Tolerate the earlier array-only storage shape, whose lines were
+            // all senior and carried no `category`. Tag them so they still
+            // classify correctly; a re-import adds the full reconciliation.
             analysis = Array.isArray(raw)
-              ? { lines: raw as DiscountLine[], reportedTotalDiscount: null }
+              ? {
+                  lines: (raw as DiscountLine[]).map((l) => ({
+                    ...l,
+                    category: l.category ?? "senior",
+                  })),
+                  reportedTotalDiscount: null,
+                }
               : (raw as DiscountAnalysis);
             cacheRef.current.set(id, analysis);
           }
