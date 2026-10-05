@@ -624,6 +624,26 @@ export default function SeniorDiscountSummaryPage() {
             />
           </div>
 
+          {/* Per-year comparison */}
+          {years.length > 1 && (
+            <div className="mb-5">
+              <p className="font-body text-[10px] uppercase tracking-wider text-brand-text/40 mb-2">
+                {view === "senior"
+                  ? "Senior discount by year"
+                  : "Other discounts by year"}
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {years.map((yr) => (
+                  <StatCard
+                    key={yr.year}
+                    label={`${yr.year} · ${yr.count.toLocaleString()} lines`}
+                    value={fmtMoney(yr.total)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           {noData ? (
             <div className="bg-white border-l-[3px] border-brand-green rounded p-6 text-center">
               <p className="text-brand-text/50 font-body text-sm">
