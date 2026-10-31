@@ -22,7 +22,8 @@ export function matchKey(name: string): string {
   if (/air max 270/.test(n)) return "air max 270";
   if (/air max 90/.test(n)) return "air max 90";
   if (/air max nova/.test(n)) return "air max nova";
-  if (/air max/.test(n)) return "air max";
+  // Other Air Max models match only by exact name (fall through), so a model
+  // we don't carry (Chroma, Invigor, …) isn't lumped into a generic bucket.
   if (/dunk/.test(n)) return "dunk";
   if (/kawa/.test(n)) return "kawa";
   if (/cosmic/.test(n)) return "cosmic runner";
