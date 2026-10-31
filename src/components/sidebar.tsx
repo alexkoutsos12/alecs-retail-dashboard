@@ -17,6 +17,7 @@ import {
   Tag,
   ClipboardList,
   Percent,
+  Footprints,
   Settings,
   LogOut,
   X,
@@ -33,6 +34,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Tag,
   ClipboardList,
   Percent,
+  Footprints,
 };
 
 interface SidebarProps {

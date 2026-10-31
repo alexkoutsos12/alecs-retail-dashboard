@@ -127,6 +127,19 @@ export const appModules: AppModule[] = [
     ],
   },
   {
+    id: "nike-planner",
+    name: "Nike Planner",
+    description:
+      "Kids Nike stock organized by size run and style, with reorder signals — from the RICS Stock Status.",
+    firestoreModule: "nike-planner",
+    navItems: [
+      { label: "Planner", href: "/nike-planner/planner", icon: "Footprints" },
+      { label: "Import", href: "/nike-planner/import", icon: "Upload" },
+    ],
+    importRoute: "/nike-planner/import",
+    reportRoutes: [{ label: "Planner →", href: "/nike-planner/planner" }],
+  },
+  {
     id: "perk-inventory",
     name: "Perk Inventory",
     description:
