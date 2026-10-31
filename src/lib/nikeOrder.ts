@@ -38,7 +38,7 @@ export function matchKey(name: string): string {
   if (/tanjun/.test(n)) return "tanjun";
   if (/giann|freak/.test(n)) return "giannis";
   if (/lebron|witness/.test(n)) return "lebron witness";
-  if (/dynamite|s\.?\s?t\.?/.test(n)) return "st";
+  if (/dynamite|\bs\.\s?t\.?/.test(n)) return "st"; // Nike S.T. (dots required)
   if (/hu?a?rache/.test(n)) return "huarache";
   if (/tennis classic/.test(n)) return "tennis classic";
   if (/waffle/.test(n)) return "waffle";
