@@ -66,6 +66,7 @@ export function runKey(franchise: string, run: SizeRun): string {
 }
 
 export interface FamilyRunStats {
+  name: string; // representative canonical family name (for display)
   soldByCode: Map<number, number>;
   totalSold: number;
   totalOnHand: number;
@@ -88,6 +89,7 @@ export function buildHistory(skus: NikeSku[]): History {
     let st = families.get(key);
     if (!st) {
       st = {
+        name: k.styleFamily,
         soldByCode: new Map(),
         totalSold: 0,
         totalOnHand: 0,
@@ -189,6 +191,7 @@ export interface StyleRec {
   franchise: string;
   run: SizeRun;
   matched: boolean;
+  matchedName: string; // history family it was sized from ("" when none)
   depth: number;
   pairs: number;
   wholesaleTotal: number;
@@ -212,14 +215,38 @@ function splitWeighted(qty: number, w: DeliveryWeights): [number, number, number
 
 const SMOOTH_ALPHA = 10; // pseudo-units blended toward the run curve
 
+interface RawQty {
+  r0: number;
+  styleColor: string;
+  size: string;
+  qty: number;
+  wholesale: number;
+  retail: number;
+}
+interface StyleMeta {
+  productName: string;
+  franchise: string;
+  run: SizeRun;
+  matched: boolean;
+  matchedName: string;
+  depth: number;
+}
+
+/**
+ * Recommend per-size buy quantities.
+ *
+ * `baseline` is the fallback depth for a kept-but-new franchise. `weights`
+ * spreads each size across the three deliveries. `budget`, when > 0, caps the
+ * total pairs — if the demand-driven buy exceeds it, every quantity is scaled
+ * down proportionally so the performance emphasis is preserved.
+ */
 export function recommend(
   orderRows: OrderRow[],
   history: History,
   baseline: number,
-  weights: DeliveryWeights = [1 / 3, 1 / 3, 1 / 3]
+  weights: DeliveryWeights = [1 / 3, 1 / 3, 1 / 3],
+  budget = 0
 ): RecommendResult {
-  // Group kept rows by family (matchKey + run) so depth can be split across
-  // the colorways the buyer actually kept.
   const byFamily = new Map<string, OrderRow[]>();
   for (const row of orderRows) {
     const key = runKey(row.franchise, row.run);
@@ -227,33 +254,35 @@ export function recommend(
     byFamily.get(key)!.push(row);
   }
 
-  const rows = new Map<number, RowRec>();
-  const styleMap = new Map<string, StyleRec>();
+  const raws: RawQty[] = [];
+  const meta = new Map<string, StyleMeta>();
 
-  for (const [key, famRows] of byFamily) {
+  for (const [, famRows] of byFamily) {
+    const key = runKey(famRows[0].franchise, famRows[0].run);
     const st = history.families.get(key);
     const first = famRows[0];
     const runCurve = history.runCurves.get(first.run) ?? new Map();
-
     const hasHistory = !!st && st.totalSold > 0;
+
     if (!hasHistory && runCurve.size === 0) {
-      // Nothing at all to size from — leave blank.
-      const seen = new Set<string>();
-      for (const row of famRows) {
-        if (seen.has(row.styleColor)) continue;
-        seen.add(row.styleColor);
-        styleMap.set(row.styleColor, blankStyle(row));
-      }
+      for (const row of famRows)
+        if (!meta.has(row.styleColor))
+          meta.set(row.styleColor, {
+            productName: row.productName,
+            franchise: row.franchise,
+            run: row.run,
+            matched: false,
+            matchedName: "",
+            depth: 0,
+          });
       continue;
     }
 
     const keptColorways = new Set(famRows.map((r) => r.styleColor)).size;
-    // With family history, total buy is demand-based and split across the kept
-    // colorways. Without it (a new franchise the buyer chose to try), fall back
-    // to the baseline depth per colorway and the run's generic size spread.
     const perColorway = hasHistory
       ? Math.max(1, Math.round(familyBuyUnits(st!) / keptColorways))
       : baseline;
+    const matchedName = hasHistory ? st!.name : "";
 
     const effShare = (code: number): number => {
       const runShare = runCurve.get(code) ?? 0;
@@ -266,50 +295,62 @@ export function recommend(
     };
 
     for (const row of famRows) {
-      let rec = styleMap.get(row.styleColor);
-      if (!rec) {
-        rec = {
-          styleColor: row.styleColor,
+      if (!meta.has(row.styleColor))
+        meta.set(row.styleColor, {
           productName: row.productName,
           franchise: row.franchise,
           run: row.run,
           matched: true,
+          matchedName,
           depth: perColorway,
-          pairs: 0,
-          wholesaleTotal: 0,
-          retailTotal: 0,
-          sizes: [],
-        };
-        styleMap.set(row.styleColor, rec);
-      }
+        });
       const qty = Math.round(perColorway * effShare(row.code));
-      if (qty > 0) {
-        rows.set(row.r0, { r0: row.r0, qty, split: splitWeighted(qty, weights) });
-        rec.pairs += qty;
-        rec.wholesaleTotal += qty * row.wholesale;
-        rec.retailTotal += qty * row.retail;
-        rec.sizes.push({ size: row.size, qty });
-      }
+      if (qty > 0)
+        raws.push({
+          r0: row.r0,
+          styleColor: row.styleColor,
+          size: row.size,
+          qty,
+          wholesale: row.wholesale,
+          retail: row.retail,
+        });
     }
+  }
+
+  // Budget scaling (pairs).
+  const totalRaw = raws.reduce((s, r) => s + r.qty, 0);
+  const factor = budget > 0 && totalRaw > budget ? budget / totalRaw : 1;
+
+  const rows = new Map<number, RowRec>();
+  const styleMap = new Map<string, StyleRec>();
+  for (const [sc, m] of meta)
+    styleMap.set(sc, {
+      styleColor: sc,
+      productName: m.productName,
+      franchise: m.franchise,
+      run: m.run,
+      matched: m.matched,
+      matchedName: m.matchedName,
+      depth: m.depth,
+      pairs: 0,
+      wholesaleTotal: 0,
+      retailTotal: 0,
+      sizes: [],
+    });
+
+  for (const raw of raws) {
+    const q = factor < 1 ? Math.round(raw.qty * factor) : raw.qty;
+    if (q <= 0) continue;
+    rows.set(raw.r0, { r0: raw.r0, qty: q, split: splitWeighted(q, weights) });
+    const rec = styleMap.get(raw.styleColor)!;
+    rec.pairs += q;
+    rec.wholesaleTotal += q * raw.wholesale;
+    rec.retailTotal += q * raw.retail;
+    rec.sizes.push({ size: raw.size, qty: q });
   }
 
   const styles = [...styleMap.values()].sort(
     (a, b) => Number(b.matched) - Number(a.matched) || b.pairs - a.pairs
   );
   return { rows, styles };
-}
-
-function blankStyle(row: OrderRow): StyleRec {
-  return {
-    styleColor: row.styleColor,
-    productName: row.productName,
-    franchise: row.franchise,
-    run: row.run,
-    matched: false,
-    depth: 0,
-    pairs: 0,
-    wholesaleTotal: 0,
-    retailTotal: 0,
-    sizes: [],
-  };
 }

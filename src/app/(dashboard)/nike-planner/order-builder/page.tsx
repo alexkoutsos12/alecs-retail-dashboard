@@ -99,6 +99,8 @@ interface Product {
   conviction: Conviction;
   sellThrough: number;
   recommendedColorways: number;
+  matchedName: string;
+  matchedSold: number;
   colorways: Colorway[];
 }
 
@@ -133,6 +135,7 @@ export default function OrderBuilderPage() {
   >("needs");
   const [baseline, setBaseline] = useState(12);
   const [delivery, setDelivery] = useState<keyof typeof DELIVERY>("even");
+  const [budget, setBudget] = useState(0); // 0 = no cap (pairs)
 
   useEffect(() => {
     document.title = "Order Builder · Nike Planner";
@@ -312,6 +315,8 @@ export default function OrderBuilderPage() {
         conviction: guide.conviction,
         sellThrough: st ? st.sellThrough : 0,
         recommendedColorways: guide.recommendedColorways,
+        matchedName: st ? st.name : "",
+        matchedSold: st ? st.totalSold : 0,
         colorways,
       });
     }
@@ -354,8 +359,8 @@ export default function OrderBuilderPage() {
     [orderRows, kept]
   );
   const result = useMemo(
-    () => recommend(keptRows, history, baseline, DELIVERY[delivery].w),
-    [keptRows, history, baseline, delivery]
+    () => recommend(keptRows, history, baseline, DELIVERY[delivery].w, budget),
+    [keptRows, history, baseline, delivery, budget]
   );
   const matchedStyles = result.styles.filter((s) => s.matched && s.pairs > 0);
   const totalPairs = matchedStyles.reduce((s, x) => s + x.pairs, 0);
@@ -624,6 +629,19 @@ export default function OrderBuilderPage() {
                     ))}
                   </select>
                 </label>
+                <label className="flex items-center gap-2 font-body text-sm">
+                  <span className="text-brand-text/60">Pairs budget</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={budget || ""}
+                    placeholder="none"
+                    onChange={(e) =>
+                      setBudget(Math.max(0, Number(e.target.value) || 0))
+                    }
+                    className="w-24 border border-brand-cream-dark rounded px-2 py-1 text-sm text-brand-text focus:outline-none focus:border-brand-green"
+                  />
+                </label>
                 <button
                   onClick={download}
                   disabled={matchedStyles.length === 0}
@@ -639,7 +657,14 @@ export default function OrderBuilderPage() {
                   label="Styles ordered"
                   value={String(matchedStyles.length)}
                 />
-                <StatCard label="Total pairs" value={totalPairs.toLocaleString()} />
+                <StatCard
+                  label={budget > 0 ? "Pairs (of budget)" : "Total pairs"}
+                  value={
+                    budget > 0
+                      ? `${totalPairs.toLocaleString()} / ${budget.toLocaleString()}`
+                      : totalPairs.toLocaleString()
+                  }
+                />
                 <StatCard label="Wholesale cost" value={fmtMoney(totalWholesale)} />
                 <StatCard label="Retail value" value={fmtMoney(totalRetail)} />
               </div>
@@ -675,6 +700,9 @@ export default function OrderBuilderPage() {
                             {s.productName}
                             <span className="text-brand-text/40 text-xs block">
                               {s.franchise}
+                              {s.matchedName && s.matchedName !== s.franchise
+                                ? ` → sized from ${s.matchedName}`
+                                : ""}
                             </span>
                           </td>
                           <td className="px-3 py-2 text-brand-text/70 whitespace-nowrap">
@@ -750,7 +778,9 @@ function ProductCard({
         {product.carried && (
           <span className="font-body text-[11px] text-brand-text/45">
             suggest ~{product.recommendedColorways} colorway
-            {product.recommendedColorways === 1 ? "" : "s"}
+            {product.recommendedColorways === 1 ? "" : "s"} · sized from{" "}
+            <span className="text-brand-text/60">{product.matchedName}</span> (
+            {product.matchedSold} sold)
           </span>
         )}
         <div className="ml-auto flex gap-3 text-xs font-body items-center">
