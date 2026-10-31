@@ -264,6 +264,27 @@ export default function NikePlannerPage() {
       return n;
     });
 
+  const expandAll = () => {
+    setExpandedRuns(new Set(runGroups.map((r) => r.run)));
+    setExpandedFamilies(
+      new Set(
+        runGroups.flatMap((r) =>
+          r.families.map((f) => `${r.run}::${f.family}`)
+        )
+      )
+    );
+  };
+  const collapseAll = () => {
+    setExpandedRuns(new Set());
+    setExpandedFamilies(new Set());
+    setExpandedSkus(new Set());
+  };
+
+  // Open the runs by default once data loads, so styles are visible at a glance.
+  useEffect(() => {
+    if (skus.length > 0) setExpandedRuns(new Set(RUN_ORDER));
+  }, [skus]);
+
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   const noReports = !loadingReports && reports.length === 0;
@@ -375,6 +396,22 @@ export default function NikePlannerPage() {
                 >
                   Reorder Winners
                 </button>
+                {view === "run" && (
+                  <div className="ml-auto flex gap-3">
+                    <button
+                      onClick={expandAll}
+                      className="font-body text-xs text-brand-green hover:underline"
+                    >
+                      Expand all
+                    </button>
+                    <button
+                      onClick={collapseAll}
+                      className="font-body text-xs text-brand-text/50 hover:underline"
+                    >
+                      Collapse all
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Filters */}
@@ -552,14 +589,14 @@ function RunRow({
     <>
       <tr
         onClick={() => onToggleRun(rg.run)}
-        className="cursor-pointer hover:bg-brand-cream/50 border-b border-brand-cream transition-colors"
+        className="cursor-pointer select-none bg-brand-cream/40 hover:bg-brand-cream/70 border-t-2 border-brand-cream-dark transition-colors"
       >
-        <td className="px-3 py-2.5 text-brand-text/30">
+        <td className="px-3 py-3 text-brand-text/40">
           <ChevronRight
-            className={`w-4 h-4 transition-transform ${runOpen ? "rotate-90" : ""}`}
+            className={`w-5 h-5 transition-transform ${runOpen ? "rotate-90" : ""}`}
           />
         </td>
-        <td className="px-3 py-2.5 font-heading font-bold text-brand-green">
+        <td className="px-3 py-3 font-heading font-bold text-brand-green text-[15px]">
           {rg.run}{" "}
           <span className="font-body font-normal text-brand-text/40 text-xs">
             · {rg.families.length} styles · {rg.skuCount} colorways
@@ -607,7 +644,7 @@ function FamilyRow({
     <>
       <tr
         onClick={() => onToggleFamily(fkey)}
-        className="cursor-pointer hover:bg-brand-cream/40 border-b border-brand-cream transition-colors bg-brand-cream/20"
+        className="cursor-pointer select-none hover:bg-brand-cream/40 border-b border-brand-cream transition-colors"
       >
         <td className="py-2 pl-8 pr-3 text-brand-text/30">
           <ChevronRight
@@ -623,18 +660,23 @@ function FamilyRow({
         <Metrics onHand={fg.onHand} onOrder={fg.onOrder} sold={fg.sold} />
       </tr>
 
-      {famOpen &&
-        fg.skus.map((sku) => {
-          const skuOpen = expandedSkus.has(sku.sku);
-          return (
+      {famOpen && (
+        <>
+          <tr className="border-b border-brand-cream">
+            <td colSpan={6} className="p-0">
+              <FamilySizeSummary skus={fg.skus} />
+            </td>
+          </tr>
+          {fg.skus.map((sku) => (
             <SkuRow
               key={sku.sku}
               sku={sku}
-              skuOpen={skuOpen}
+              skuOpen={expandedSkus.has(sku.sku)}
               onToggleSku={onToggleSku}
             />
-          );
-        })}
+          ))}
+        </>
+      )}
     </>
   );
 }
@@ -652,7 +694,7 @@ function SkuRow({
     <>
       <tr
         onClick={() => onToggleSku(sku.sku)}
-        className="cursor-pointer hover:bg-brand-cream/30 border-b border-brand-cream transition-colors"
+        className="cursor-pointer select-none hover:bg-brand-cream/30 border-b border-brand-cream transition-colors"
       >
         <td className="py-1.5 pl-14 pr-3 text-brand-text/30">
           <ChevronRight
@@ -775,6 +817,151 @@ function ReorderRow({
         </tr>
       )}
     </>
+  );
+}
+
+// ─── Family size summary (grid analysis across all colorways) ────────────────
+
+interface CurveCell {
+  code: number;
+  label: string;
+  order: number;
+  onHand: number;
+  onOrder: number;
+  sold: number;
+}
+
+function familyCurve(skus: NikeSku[]): CurveCell[] {
+  const m = new Map<number, CurveCell>();
+  for (const k of skus) {
+    for (const s of k.sizes) {
+      const e =
+        m.get(s.code) ??
+        {
+          code: s.code,
+          label: s.label,
+          order: s.order,
+          onHand: 0,
+          onOrder: 0,
+          sold: 0,
+        };
+      e.onHand += s.onHand;
+      e.onOrder += s.onOrder;
+      e.sold += s.sold;
+      m.set(s.code, e);
+    }
+  }
+  return [...m.values()].sort((a, b) => a.order - b.order);
+}
+
+function heat(n: number, scale: "stock" | "sold"): string {
+  if (n <= 0) return "";
+  const stock = [
+    "bg-emerald-50",
+    "bg-emerald-100",
+    "bg-emerald-200",
+    "bg-emerald-300",
+    "bg-emerald-400",
+  ];
+  const sold = [
+    "bg-amber-50",
+    "bg-amber-100",
+    "bg-amber-200",
+    "bg-amber-300",
+    "bg-amber-400",
+  ];
+  const arr = scale === "stock" ? stock : sold;
+  const idx = n <= 2 ? 0 : n <= 5 ? 1 : n <= 10 ? 2 : n <= 20 ? 3 : 4;
+  return arr[idx];
+}
+
+function FamilySizeSummary({ skus }: { skus: NikeSku[] }) {
+  const curve = familyCurve(skus);
+  if (curve.length === 0) return null;
+  const totOh = curve.reduce((s, c) => s + c.onHand, 0);
+  const totOo = curve.reduce((s, c) => s + c.onOrder, 0);
+  const totSo = curve.reduce((s, c) => s + c.sold, 0);
+  return (
+    <div className="bg-white px-4 py-3 border-y border-brand-cream-dark">
+      <p className="font-body text-[11px] uppercase tracking-wider text-brand-text/40 mb-2">
+        Size summary · all {skus.length} colorways
+      </p>
+      <div className="overflow-x-auto">
+        <table className="text-xs font-body">
+          <thead>
+            <tr className="text-brand-text/40">
+              <th className="pr-3 py-1 text-right font-normal" />
+              {curve.map((c) => (
+                <th
+                  key={c.code}
+                  className="px-1.5 py-1 text-center font-semibold text-brand-text/70 min-w-[34px]"
+                >
+                  {c.label}
+                </th>
+              ))}
+              <th className="pl-3 py-1 text-center font-semibold text-brand-text/50">
+                Tot
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="pr-3 py-0.5 text-right text-brand-text/50">
+                On hand
+              </td>
+              {curve.map((c) => {
+                const gap = c.onHand === 0 && c.sold > 0;
+                return (
+                  <td
+                    key={c.code}
+                    className={`px-1.5 py-1 text-center tabular-nums ${
+                      gap
+                        ? "bg-red-100 text-red-700 font-semibold"
+                        : heat(c.onHand, "stock")
+                    }`}
+                  >
+                    {gap ? "0" : c.onHand || ""}
+                  </td>
+                );
+              })}
+              <td className="pl-3 py-1 text-center tabular-nums font-semibold">
+                {totOh}
+              </td>
+            </tr>
+            <tr>
+              <td className="pr-3 py-0.5 text-right text-brand-text/50">Sold</td>
+              {curve.map((c) => (
+                <td
+                  key={c.code}
+                  className={`px-1.5 py-1 text-center tabular-nums ${heat(
+                    c.sold,
+                    "sold"
+                  )}`}
+                >
+                  {c.sold || ""}
+                </td>
+              ))}
+              <td className="pl-3 py-1 text-center tabular-nums font-semibold">
+                {totSo}
+              </td>
+            </tr>
+            <tr className="text-brand-text/50">
+              <td className="pr-3 py-0.5 text-right">On order</td>
+              {curve.map((c) => (
+                <td key={c.code} className="px-1.5 py-1 text-center tabular-nums">
+                  {c.onOrder || ""}
+                </td>
+              ))}
+              <td className="pl-3 py-1 text-center tabular-nums">{totOo}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] text-brand-text/40 mt-2">
+        Darker green = more on hand · darker amber = more sold · red 0 = sold
+        with none on hand (size gap to chase).
+      </p>
+    </div>
   );
 }
 
