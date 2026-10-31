@@ -18,7 +18,6 @@ import {
   query,
   where,
   orderBy,
-  limit,
   getDocs,
 } from "firebase/firestore";
 import { ref as storageRef, getDownloadURL } from "firebase/storage";
@@ -26,10 +25,13 @@ import { NikeSku, SizeRun } from "@/lib/parsers/parseNikeStock";
 import {
   buildHistory,
   recommend,
-  matchKey,
+  familyGuide,
+  runKey,
   ageToRun,
   sizeToCode,
   OrderRow,
+  Conviction,
+  DeliveryWeights,
 } from "@/lib/nikeOrder";
 import { extractRowImages } from "@/lib/xlsxImages";
 
@@ -43,12 +45,18 @@ const COL = {
   h: 7,
   i: 8,
   franchise: 11,
-  color: 16, // Q Color Description
+  color: 16,
   wholesale: 17,
   retail: 19,
   age: 25,
 };
 const DATA_START = 5;
+
+const DELIVERY: Record<string, { label: string; w: DeliveryWeights }> = {
+  even: { label: "Even", w: [1 / 3, 1 / 3, 1 / 3] },
+  front: { label: "Front-load 50/30/20", w: [0.5, 0.3, 0.2] },
+  heavy: { label: "Heavy front 60/25/15", w: [0.6, 0.25, 0.15] },
+};
 
 function fmtMoney(n: number): string {
   return `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -69,31 +77,42 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+interface ReportMeta {
+  id: string;
+  filename: string;
+  salesWindow: string;
+  storagePath: string;
+}
 interface Colorway {
   styleColor: string;
   color: string;
-  run: SizeRun;
   retail: number;
-  wholesale: number;
   image?: string;
-  hasHistory: boolean;
 }
 interface Product {
   styleNumber: string;
   name: string;
   franchise: string;
+  run: SizeRun;
   runs: string;
   carried: boolean;
+  conviction: Conviction;
   sellThrough: number;
+  recommendedColorways: number;
   colorways: Colorway[];
 }
 
 export default function OrderBuilderPage() {
+  // Stock snapshots
+  const [reports, setReports] = useState<ReportMeta[]>([]);
+  const [reportsLoading, setReportsLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState("");
   const [skus, setSkus] = useState<NikeSku[] | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(true);
-  const [historyName, setHistoryName] = useState("");
+  const [skusLoading, setSkusLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const skuCache = useRef<Map<string, NikeSku[]>>(new Map());
 
+  // Order form
   const [bufferRef] = useState<{ current: ArrayBuffer | null }>({
     current: null,
   });
@@ -109,16 +128,17 @@ export default function OrderBuilderPage() {
 
   const [kept, setKept] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<"review" | "build">("review");
-  const [reviewFilter, setReviewFilter] = useState<"all" | "carried" | "new">(
-    "all"
-  );
+  const [reviewFilter, setReviewFilter] = useState<
+    "all" | "needs" | "carried" | "new"
+  >("needs");
   const [baseline, setBaseline] = useState(12);
+  const [delivery, setDelivery] = useState<keyof typeof DELIVERY>("even");
 
   useEffect(() => {
     document.title = "Order Builder · Nike Planner";
   }, []);
 
-  // ─── Load latest stock import ────────────────────────────────────────────────
+  // ─── Load snapshot list ──────────────────────────────────────────────────────
   useEffect(() => {
     async function run() {
       try {
@@ -126,35 +146,55 @@ export default function OrderBuilderPage() {
           query(
             collection(db, "reports"),
             where("module", "==", MODULE),
-            orderBy("uploadedAt", "desc"),
-            limit(1)
+            orderBy("uploadedAt", "desc")
           )
         );
-        if (snap.empty) {
-          setHistoryLoading(false);
-          return;
-        }
-        const d = snap.docs[0].data() as {
-          filename: string;
-          storagePath: string;
-        };
-        setHistoryName(d.filename);
-        const url = await getDownloadURL(storageRef(storage, d.storagePath));
+        const list = snap.docs.map(
+          (d) => ({ id: d.id, ...d.data() } as ReportMeta)
+        );
+        setReports(list);
+        if (list.length > 0) setSelectedId(list[0].id);
+      } catch (err) {
+        setHistoryError(
+          err instanceof Error ? err.message : "Failed to list stock imports."
+        );
+      } finally {
+        setReportsLoading(false);
+      }
+    }
+    run();
+  }, []);
+
+  // Load the selected snapshot's SKUs.
+  useEffect(() => {
+    if (!selectedId) return;
+    const report = reports.find((r) => r.id === selectedId);
+    if (!report) return;
+    const cached = skuCache.current.get(selectedId);
+    if (cached) {
+      setSkus(cached);
+      return;
+    }
+    setSkusLoading(true);
+    (async () => {
+      try {
+        const url = await getDownloadURL(storageRef(storage, report.storagePath));
         const res = await fetch(
           `/api/storage-proxy?url=${encodeURIComponent(url)}`
         );
         if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
-        setSkus((await res.json()) as NikeSku[]);
+        const data = (await res.json()) as NikeSku[];
+        skuCache.current.set(selectedId, data);
+        setSkus(data);
       } catch (err) {
         setHistoryError(
           err instanceof Error ? err.message : "Failed to load stock data."
         );
       } finally {
-        setHistoryLoading(false);
+        setSkusLoading(false);
       }
-    }
-    run();
-  }, []);
+    })();
+  }, [selectedId, reports]);
 
   const history = useMemo(() => buildHistory(skus ?? []), [skus]);
 
@@ -189,12 +229,8 @@ export default function OrderBuilderPage() {
             wholesale: Number(cellVal(ws, r0, COL.wholesale)) || 0,
             retail: Number(cellVal(ws, r0, COL.retail)) || 0,
           });
-          if (!colors.has(styleColor)) {
-            colors.set(
-              styleColor,
-              String(cellVal(ws, r0, COL.color) ?? "").trim()
-            );
-          }
+          if (!colors.has(styleColor))
+            colors.set(styleColor, String(cellVal(ws, r0, COL.color) ?? "").trim());
         }
         if (rows.length === 0)
           throw new Error(
@@ -231,7 +267,7 @@ export default function OrderBuilderPage() {
     if (f) handleFile(f);
   };
 
-  // ─── Products (by style number) ──────────────────────────────────────────────
+  // ─── Products ────────────────────────────────────────────────────────────────
   const products = useMemo<Product[]>(() => {
     const byNum = new Map<string, OrderRow[]>();
     for (const r of orderRows) {
@@ -241,22 +277,16 @@ export default function OrderBuilderPage() {
     }
     const out: Product[] = [];
     for (const [num, rows] of byNum) {
+      const first = rows[0];
+      const guide = familyGuide(first.franchise, first.run, history, baseline);
+      const st = history.families.get(runKey(first.franchise, first.run));
       const cwMap = new Map<string, OrderRow[]>();
       for (const r of rows) {
         if (!cwMap.has(r.styleColor)) cwMap.set(r.styleColor, []);
         cwMap.get(r.styleColor)!.push(r);
       }
       const colorways: Colorway[] = [];
-      let carried = false;
-      let sellThrough = 0;
       for (const [sc, crows] of cwMap) {
-        const f = crows[0];
-        const st = history.get(`${matchKey(f.franchise)}::${f.run}`);
-        const has = !!st && st.totalSold > 0;
-        if (has && st) {
-          carried = true;
-          sellThrough = Math.max(sellThrough, st.sellThrough);
-        }
         let image: string | undefined;
         for (const r of crows) {
           const im = images.get(r.r0);
@@ -268,57 +298,64 @@ export default function OrderBuilderPage() {
         colorways.push({
           styleColor: sc,
           color: colorByStyle.get(sc) ?? "",
-          run: f.run,
-          retail: f.retail,
-          wholesale: f.wholesale,
+          retail: crows[0].retail,
           image,
-          hasHistory: has,
         });
       }
-      const first = rows[0];
       out.push({
         styleNumber: num,
         name: first.productName,
         franchise: first.franchise,
+        run: first.run,
         runs: [...new Set(rows.map((r) => r.run))].join(", "),
-        carried,
-        sellThrough,
+        carried: guide.familyBuyUnits > 0,
+        conviction: guide.conviction,
+        sellThrough: st ? st.sellThrough : 0,
+        recommendedColorways: guide.recommendedColorways,
         colorways,
       });
     }
+    const order: Record<Conviction, number> = { high: 0, ask: 1, skip: 2 };
     return out.sort(
-      (a, b) => Number(b.carried) - Number(a.carried) || a.name.localeCompare(b.name)
+      (a, b) =>
+        order[a.conviction] - order[b.conviction] ||
+        b.sellThrough - a.sellThrough ||
+        a.name.localeCompare(b.name)
     );
-  }, [orderRows, colorByStyle, images, history]);
+  }, [orderRows, colorByStyle, images, history, baseline]);
 
-  // Pre-keep carried colorways once per upload.
-  const initRef = useRef<OrderRow[] | null>(null);
+  // Pre-keep high-conviction colorways whenever the order form or the chosen
+  // sales history changes.
+  const initRef = useRef<{ rows: OrderRow[]; skus: NikeSku[] | null } | null>(
+    null
+  );
   useEffect(() => {
-    if (orderRows.length === 0 || initRef.current === orderRows) return;
-    initRef.current = orderRows;
+    if (orderRows.length === 0) return;
+    if (
+      initRef.current &&
+      initRef.current.rows === orderRows &&
+      initRef.current.skus === skus
+    )
+      return;
+    initRef.current = { rows: orderRows, skus };
     const def = new Set<string>();
-    const seen = new Set<string>();
-    for (const r of orderRows) {
-      if (seen.has(r.styleColor)) continue;
-      seen.add(r.styleColor);
-      const st = history.get(`${matchKey(r.franchise)}::${r.run}`);
-      if (st && st.totalSold > 0) def.add(r.styleColor);
-    }
+    for (const p of products)
+      if (p.conviction === "high")
+        for (const cw of p.colorways) def.add(cw.styleColor);
     setKept(def);
-  }, [orderRows, history]);
+  }, [orderRows, products, skus]);
 
   const totalColorways = useMemo(
     () => new Set(orderRows.map((r) => r.styleColor)).size,
     [orderRows]
   );
-
   const keptRows = useMemo(
     () => orderRows.filter((r) => kept.has(r.styleColor)),
     [orderRows, kept]
   );
   const result = useMemo(
-    () => recommend(keptRows, history, baseline),
-    [keptRows, history, baseline]
+    () => recommend(keptRows, history, baseline, DELIVERY[delivery].w),
+    [keptRows, history, baseline, delivery]
   );
   const matchedStyles = result.styles.filter((s) => s.matched && s.pairs > 0);
   const totalPairs = matchedStyles.reduce((s, x) => s + x.pairs, 0);
@@ -348,10 +385,13 @@ export default function OrderBuilderPage() {
   const visibleProducts = products.filter((p) =>
     reviewFilter === "all"
       ? true
+      : reviewFilter === "needs"
+      ? p.conviction === "ask"
       : reviewFilter === "carried"
       ? p.carried
       : !p.carried
   );
+  const needsCount = products.filter((p) => p.conviction === "ask").length;
 
   // ─── Download ────────────────────────────────────────────────────────────────
   const download = () => {
@@ -378,7 +418,7 @@ export default function OrderBuilderPage() {
     URL.revokeObjectURL(url);
   };
 
-  const noHistory = !historyLoading && !skus;
+  const noReports = !reportsLoading && reports.length === 0;
 
   return (
     <div>
@@ -390,11 +430,11 @@ export default function OrderBuilderPage() {
         size recommendations from your stock history.
       </p>
 
-      {historyLoading ? (
+      {reportsLoading ? (
         <div className="bg-white border-l-[3px] border-brand-green rounded p-4 mb-5 text-sm font-body text-brand-text/50">
-          Loading stock history…
+          Loading stock imports…
         </div>
-      ) : noHistory ? (
+      ) : noReports ? (
         <div className="bg-white border-l-[3px] border-brand-green rounded p-6 mb-5 text-center">
           <p className="text-brand-text/50 font-body text-sm mb-3">
             No stock status imported yet — the recommendations are built from it.
@@ -407,15 +447,26 @@ export default function OrderBuilderPage() {
           </Link>
         </div>
       ) : (
-        <div className="bg-white border-l-[3px] border-brand-green rounded p-4 mb-5 text-sm font-body text-brand-text/60">
-          Based on <strong className="text-brand-text">{historyName}</strong>
-          {historyError && <span className="text-red-600"> · {historyError}</span>}
+        <div className="bg-white border-l-[3px] border-brand-green rounded p-4 mb-5 flex flex-wrap items-center gap-2 text-sm font-body text-brand-text/60">
+          <span>Sales history:</span>
+          <select
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value)}
+            className="border border-brand-cream-dark rounded px-2 py-1 text-sm bg-white text-brand-text focus:outline-none focus:border-brand-green"
+          >
+            {reports.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.salesWindow} — {r.filename}
+              </option>
+            ))}
+          </select>
+          {skusLoading && <span className="text-brand-text/40">loading…</span>}
+          {historyError && <span className="text-red-600">· {historyError}</span>}
         </div>
       )}
 
-      {!noHistory && !historyLoading && (
+      {!noReports && !reportsLoading && (
         <>
-          {/* Upload */}
           {orderRows.length === 0 && (
             <div
               onClick={() => fileInputRef.current?.click()}
@@ -456,21 +507,27 @@ export default function OrderBuilderPage() {
             </div>
           )}
 
-          {/* ─── REVIEW PHASE ─── */}
+          {/* ─── REVIEW ─── */}
           {orderRows.length > 0 && phase === "review" && (
             <>
               <div className="sticky top-0 z-20 bg-brand-cream pt-1 pb-3 mb-3">
                 <div className="bg-white border border-brand-cream-dark rounded px-4 py-3 flex flex-wrap items-center gap-3">
                   <span className="font-body text-sm text-brand-text">
-                    <strong>{kept.size}</strong> of {totalColorways} colorways
-                    kept
+                    <strong>{kept.size}</strong> of {totalColorways} kept
                     <span className="text-brand-text/40">
                       {" "}
-                      · ~{totalPairs} pairs · {fmtMoney(totalWholesale)} wholesale
+                      · ~{totalPairs} pairs · {fmtMoney(totalWholesale)}
                     </span>
                   </span>
                   <div className="flex gap-1">
-                    {(["all", "carried", "new"] as const).map((f) => (
+                    {(
+                      [
+                        ["needs", `Needs your call (${needsCount})`],
+                        ["all", "All"],
+                        ["carried", "Carried"],
+                        ["new", "New"],
+                      ] as const
+                    ).map(([f, label]) => (
                       <button
                         key={f}
                         onClick={() => setReviewFilter(f)}
@@ -480,11 +537,7 @@ export default function OrderBuilderPage() {
                             : "bg-brand-cream text-brand-text/70 hover:bg-brand-cream-dark"
                         }`}
                       >
-                        {f === "all"
-                          ? "All"
-                          : f === "carried"
-                          ? "Carried"
-                          : "New franchises"}
+                        {label}
                       </button>
                     ))}
                   </div>
@@ -510,6 +563,12 @@ export default function OrderBuilderPage() {
                     </button>
                   </div>
                 </div>
+                {reviewFilter === "needs" && needsCount === 0 && (
+                  <p className="font-body text-xs text-brand-text/40 mt-2 px-1">
+                    Nothing needs your call — high-conviction styles were
+                    pre-kept and weak sellers skipped. Switch to All to adjust.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-3">
@@ -526,7 +585,7 @@ export default function OrderBuilderPage() {
             </>
           )}
 
-          {/* ─── BUILD PHASE ─── */}
+          {/* ─── BUILD ─── */}
           {orderRows.length > 0 && phase === "build" && (
             <>
               <div className="bg-white border border-brand-cream-dark rounded px-4 py-3 flex flex-wrap items-center gap-4 mb-5">
@@ -537,9 +596,7 @@ export default function OrderBuilderPage() {
                   ← Back to review
                 </button>
                 <label className="flex items-center gap-2 font-body text-sm">
-                  <span className="text-brand-text/60">
-                    Baseline pairs / colorway
-                  </span>
+                  <span className="text-brand-text/60">Target pairs / colorway</span>
                   <input
                     type="number"
                     min={1}
@@ -551,10 +608,22 @@ export default function OrderBuilderPage() {
                     className="w-20 border border-brand-cream-dark rounded px-2 py-1 text-sm text-brand-text focus:outline-none focus:border-brand-green"
                   />
                 </label>
-                <span className="font-body text-xs text-brand-text/40">
-                  Depth = baseline × (0.5 + sell-through); spread by each
-                  family&apos;s historical size curve.
-                </span>
+                <label className="flex items-center gap-2 font-body text-sm">
+                  <span className="text-brand-text/60">Deliveries</span>
+                  <select
+                    value={delivery}
+                    onChange={(e) =>
+                      setDelivery(e.target.value as keyof typeof DELIVERY)
+                    }
+                    className="border border-brand-cream-dark rounded px-2 py-1 text-sm bg-white text-brand-text focus:outline-none focus:border-brand-green"
+                  >
+                    {Object.entries(DELIVERY).map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   onClick={download}
                   disabled={matchedStyles.length === 0}
@@ -642,6 +711,12 @@ export default function OrderBuilderPage() {
 
 // ─── Product review card ──────────────────────────────────────────────────────
 
+const CONV: Record<Conviction, { label: string; cls: string }> = {
+  high: { label: "High conviction", cls: "bg-emerald-100 text-emerald-800" },
+  ask: { label: "Your call", cls: "bg-amber-100 text-amber-800" },
+  skip: { label: "Weak seller", cls: "bg-slate-100 text-slate-500" },
+};
+
 function ProductCard({
   product,
   kept,
@@ -656,6 +731,7 @@ function ProductCard({
   const keptCount = product.colorways.filter((c) =>
     kept.has(c.styleColor)
   ).length;
+  const conv = CONV[product.conviction];
   return (
     <div className="bg-white border border-brand-cream-dark rounded p-3">
       <div className="flex items-center gap-2 mb-2.5 flex-wrap">
@@ -665,16 +741,19 @@ function ProductCard({
         <span className="font-body text-xs text-brand-text/40">
           {product.franchise} · {product.runs}
         </span>
-        {product.carried ? (
-          <span className="rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10px] font-body font-medium">
-            You sell this · {Math.round(product.sellThrough * 100)}% sell-through
-          </span>
-        ) : (
-          <span className="rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-body font-medium">
-            New — no history
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-body font-medium ${conv.cls}`}
+        >
+          {conv.label}
+          {product.carried && ` · ${Math.round(product.sellThrough * 100)}% ST`}
+        </span>
+        {product.carried && (
+          <span className="font-body text-[11px] text-brand-text/45">
+            suggest ~{product.recommendedColorways} colorway
+            {product.recommendedColorways === 1 ? "" : "s"}
           </span>
         )}
-        <div className="ml-auto flex gap-3 text-xs font-body">
+        <div className="ml-auto flex gap-3 text-xs font-body items-center">
           <button
             onClick={() => onSetProduct(product, true)}
             className="text-brand-green hover:underline"
@@ -687,8 +766,16 @@ function ProductCard({
           >
             Skip all
           </button>
-          <span className="text-brand-text/40">
-            {keptCount}/{product.colorways.length}
+          <span
+            className={`font-medium ${
+              product.carried &&
+              keptCount > product.recommendedColorways &&
+              product.recommendedColorways > 0
+                ? "text-amber-600"
+                : "text-brand-text/50"
+            }`}
+          >
+            {keptCount} kept
           </span>
         </div>
       </div>
@@ -732,10 +819,7 @@ function ProductCard({
                   {cw.color || cw.styleColor}
                 </p>
                 <p className="text-[10px] text-brand-text/40">
-                  {cw.styleColor.split("-")[1]
-                    ? `-${cw.styleColor.split("-")[1]}`
-                    : cw.styleColor}{" "}
-                  · ${cw.retail}
+                  {cw.styleColor} · ${cw.retail}
                 </p>
               </div>
             </button>

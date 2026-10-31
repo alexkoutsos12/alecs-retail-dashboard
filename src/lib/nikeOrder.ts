@@ -3,18 +3,18 @@ import { NikeSku, SizeRun } from "./parsers/parseNikeStock";
 /**
  * Nike Order Builder engine.
  *
- * Matches a Nike.net order form (new-season styles, one row per
- * style-color + size) against the historical stock-status analysis already
- * imported into the Planner, and recommends a per-size buy quantity.
+ * Matches a Nike.net order form against the historical stock-status analysis
+ * imported into the Planner and recommends a per-size buy quantity.
  *
- * Fully adaptive to the imported stock status: a style-color is only
- * recommended when its franchise + size run exists in the history. Families
- * the store doesn't carry (e.g. soccer cleats, brand-new silhouettes) are
- * left blank. Within a matched family, the historical size-sell curve sets
- * the spread and sell-through scales the depth off a user baseline.
+ * Model (all driven by the imported stock status, so it's fully adaptive):
+ *   - Each franchise + size run gets a conviction tier and a recommended
+ *     colorway count from how it sold.
+ *   - The total units to buy for a family = historical units sold, adjusted
+ *     by sell-through. That total is split across however many colorways the
+ *     buyer keeps (keep fewer -> each is deeper), then distributed across a
+ *     smoothed size-sell curve, then split across the delivery dates.
  */
 
-/** Reduce a franchise / style-family name to a coarse key both sides share. */
 export function matchKey(name: string): string {
   const n = name.toLowerCase();
   if (/air force 1|force 1|af1/.test(n)) return "air force 1";
@@ -54,11 +54,14 @@ export function ageToRun(age: string): SizeRun {
   return "Other";
 }
 
-/** "10.5C" / "3.5Y" / "2C" -> size code (size * 10). */
 export function sizeToCode(size: string): number {
   const m = size.match(/([\d.]+)/);
   if (!m) return 0;
   return Math.round(parseFloat(m[1]) * 10);
+}
+
+export function runKey(franchise: string, run: SizeRun): string {
+  return `${matchKey(franchise)}::${run}`;
 }
 
 export interface FamilyRunStats {
@@ -69,12 +72,19 @@ export interface FamilyRunStats {
   sellThrough: number;
 }
 
-/** Build per (matchKey + run) historical stats from the imported SKUs. */
-export function buildHistory(skus: NikeSku[]): Map<string, FamilyRunStats> {
-  const map = new Map<string, FamilyRunStats>();
+export interface History {
+  families: Map<string, FamilyRunStats>;
+  // Normalized size-sell share by code, per run — used to smooth thin curves.
+  runCurves: Map<SizeRun, Map<number, number>>;
+}
+
+export function buildHistory(skus: NikeSku[]): History {
+  const families = new Map<string, FamilyRunStats>();
+  const runTotals = new Map<SizeRun, Map<number, number>>();
+
   for (const k of skus) {
     const key = `${matchKey(k.styleFamily)}::${k.run}`;
-    let st = map.get(key);
+    let st = families.get(key);
     if (!st) {
       st = {
         soldByCode: new Map(),
@@ -83,29 +93,78 @@ export function buildHistory(skus: NikeSku[]): Map<string, FamilyRunStats> {
         colorways: 0,
         sellThrough: 0,
       };
-      map.set(key, st);
+      families.set(key, st);
     }
     st.colorways += 1;
+    let rt = runTotals.get(k.run);
+    if (!rt) {
+      rt = new Map();
+      runTotals.set(k.run, rt);
+    }
     for (const s of k.sizes) {
-      st.soldByCode.set(
-        s.code,
-        (st.soldByCode.get(s.code) ?? 0) + s.sold
-      );
+      st.soldByCode.set(s.code, (st.soldByCode.get(s.code) ?? 0) + s.sold);
       st.totalSold += s.sold;
       st.totalOnHand += s.onHand;
+      rt.set(s.code, (rt.get(s.code) ?? 0) + s.sold);
     }
   }
-  for (const st of map.values()) {
+  for (const st of families.values()) {
     st.sellThrough =
       st.totalSold + st.totalOnHand > 0
         ? st.totalSold / (st.totalSold + st.totalOnHand)
         : 0;
   }
-  return map;
+
+  const runCurves = new Map<SizeRun, Map<number, number>>();
+  for (const [run, rt] of runTotals) {
+    const total = [...rt.values()].reduce((a, b) => a + b, 0);
+    const share = new Map<number, number>();
+    if (total > 0)
+      for (const [code, v] of rt) share.set(code, v / total);
+    runCurves.set(run, share);
+  }
+
+  return { families, runCurves };
 }
 
+// ─── Guidance (conviction + recommended colorways) ────────────────────────────
+
+export type Conviction = "high" | "ask" | "skip";
+
+export interface FamilyGuide {
+  conviction: Conviction;
+  recommendedColorways: number;
+  familyBuyUnits: number;
+}
+
+/** Total units we'd buy for a family next season from its history. */
+function familyBuyUnits(st: FamilyRunStats): number {
+  return Math.round(st.totalSold * (0.75 + 0.5 * st.sellThrough));
+}
+
+export function familyGuide(
+  franchise: string,
+  run: SizeRun,
+  history: History,
+  baseline: number
+): FamilyGuide {
+  const st = history.families.get(runKey(franchise, run));
+  if (!st || st.totalSold === 0) {
+    return { conviction: "ask", recommendedColorways: 0, familyBuyUnits: 0 };
+  }
+  const units = familyBuyUnits(st);
+  const rec = Math.max(1, Math.round(units / Math.max(1, baseline)));
+  let conviction: Conviction;
+  if (st.sellThrough >= 0.45 && st.totalSold >= 10) conviction = "high";
+  else if (st.sellThrough < 0.25) conviction = "skip";
+  else conviction = "ask";
+  return { conviction, recommendedColorways: rec, familyBuyUnits: units };
+}
+
+// ─── Recommend ────────────────────────────────────────────────────────────────
+
 export interface OrderRow {
-  r0: number; // 0-indexed worksheet row
+  r0: number;
   styleColor: string;
   productName: string;
   franchise: string;
@@ -129,7 +188,6 @@ export interface StyleRec {
   franchise: string;
   run: SizeRun;
   matched: boolean;
-  matchedKey: string;
   depth: number;
   pairs: number;
   wholesaleTotal: number;
@@ -137,83 +195,120 @@ export interface StyleRec {
   sizes: { size: string; qty: number }[];
 }
 
-function splitThree(qty: number): [number, number, number] {
-  const base = Math.floor(qty / 3);
-  const rem = qty % 3;
-  return [base + (rem > 0 ? 1 : 0), base + (rem > 1 ? 1 : 0), base];
-}
-
 export interface RecommendResult {
   rows: Map<number, RowRec>;
   styles: StyleRec[];
 }
 
-/**
- * Produce recommendations. `baseline` is the typical pairs-per-colorway the
- * user sets; depth = round(baseline * (0.5 + sellThrough)), so a hot family
- * buys up to ~1.5x and a slow one ~0.5x. Depth is distributed across the
- * historical size-sell curve, then split across the three deliveries.
- */
+export type DeliveryWeights = [number, number, number];
+
+function splitWeighted(qty: number, w: DeliveryWeights): [number, number, number] {
+  const a = Math.round(qty * w[0]);
+  const b = Math.round(qty * w[1]);
+  const c = qty - a - b;
+  return [a, b, Math.max(0, c)];
+}
+
+const SMOOTH_ALPHA = 10; // pseudo-units blended toward the run curve
+
 export function recommend(
   orderRows: OrderRow[],
-  history: Map<string, FamilyRunStats>,
-  baseline: number
+  history: History,
+  baseline: number,
+  weights: DeliveryWeights = [1 / 3, 1 / 3, 1 / 3]
 ): RecommendResult {
-  // Group order rows by style-color.
-  const byStyle = new Map<string, OrderRow[]>();
+  // Group kept rows by family (matchKey + run) so depth can be split across
+  // the colorways the buyer actually kept.
+  const byFamily = new Map<string, OrderRow[]>();
   for (const row of orderRows) {
-    if (!byStyle.has(row.styleColor)) byStyle.set(row.styleColor, []);
-    byStyle.get(row.styleColor)!.push(row);
+    const key = runKey(row.franchise, row.run);
+    if (!byFamily.has(key)) byFamily.set(key, []);
+    byFamily.get(key)!.push(row);
   }
 
   const rows = new Map<number, RowRec>();
-  const styles: StyleRec[] = [];
+  const styleMap = new Map<string, StyleRec>();
 
-  for (const [styleColor, rowsForStyle] of byStyle) {
-    const first = rowsForStyle[0];
-    const key = `${matchKey(first.franchise)}::${first.run}`;
-    const st = history.get(key);
+  for (const [key, famRows] of byFamily) {
+    const st = history.families.get(key);
+    const first = famRows[0];
+    const runCurve = history.runCurves.get(first.run) ?? new Map();
 
-    const styleRec: StyleRec = {
-      styleColor,
-      productName: first.productName,
-      franchise: first.franchise,
-      run: first.run,
-      matched: false,
-      matchedKey: key,
-      depth: 0,
-      pairs: 0,
-      wholesaleTotal: 0,
-      retailTotal: 0,
-      sizes: [],
-    };
-
-    if (st && st.totalSold > 0) {
-      styleRec.matched = true;
-      const depth = Math.max(
-        1,
-        Math.round(baseline * (0.5 + st.sellThrough))
-      );
-      styleRec.depth = depth;
-      for (const row of rowsForStyle) {
-        const share = (st.soldByCode.get(row.code) ?? 0) / st.totalSold;
-        const qty = Math.round(depth * share);
-        if (qty > 0) {
-          rows.set(row.r0, { r0: row.r0, qty, split: splitThree(qty) });
-          styleRec.pairs += qty;
-          styleRec.wholesaleTotal += qty * row.wholesale;
-          styleRec.retailTotal += qty * row.retail;
-          styleRec.sizes.push({ size: row.size, qty });
-        }
+    const hasHistory = !!st && st.totalSold > 0;
+    if (!hasHistory && runCurve.size === 0) {
+      // Nothing at all to size from — leave blank.
+      const seen = new Set<string>();
+      for (const row of famRows) {
+        if (seen.has(row.styleColor)) continue;
+        seen.add(row.styleColor);
+        styleMap.set(row.styleColor, blankStyle(row));
       }
+      continue;
     }
 
-    styles.push(styleRec);
+    const keptColorways = new Set(famRows.map((r) => r.styleColor)).size;
+    // With family history, total buy is demand-based and split across the kept
+    // colorways. Without it (a new franchise the buyer chose to try), fall back
+    // to the baseline depth per colorway and the run's generic size spread.
+    const perColorway = hasHistory
+      ? Math.max(1, Math.round(familyBuyUnits(st!) / keptColorways))
+      : baseline;
+
+    const effShare = (code: number): number => {
+      const runShare = runCurve.get(code) ?? 0;
+      if (!hasHistory) return runShare;
+      const famShare = (st!.soldByCode.get(code) ?? 0) / st!.totalSold;
+      return (
+        (famShare * st!.totalSold + runShare * SMOOTH_ALPHA) /
+        (st!.totalSold + SMOOTH_ALPHA)
+      );
+    };
+
+    for (const row of famRows) {
+      let rec = styleMap.get(row.styleColor);
+      if (!rec) {
+        rec = {
+          styleColor: row.styleColor,
+          productName: row.productName,
+          franchise: row.franchise,
+          run: row.run,
+          matched: true,
+          depth: perColorway,
+          pairs: 0,
+          wholesaleTotal: 0,
+          retailTotal: 0,
+          sizes: [],
+        };
+        styleMap.set(row.styleColor, rec);
+      }
+      const qty = Math.round(perColorway * effShare(row.code));
+      if (qty > 0) {
+        rows.set(row.r0, { r0: row.r0, qty, split: splitWeighted(qty, weights) });
+        rec.pairs += qty;
+        rec.wholesaleTotal += qty * row.wholesale;
+        rec.retailTotal += qty * row.retail;
+        rec.sizes.push({ size: row.size, qty });
+      }
+    }
   }
 
-  styles.sort(
-    (a, b) =>
-      Number(b.matched) - Number(a.matched) || b.pairs - a.pairs
+  const styles = [...styleMap.values()].sort(
+    (a, b) => Number(b.matched) - Number(a.matched) || b.pairs - a.pairs
   );
   return { rows, styles };
+}
+
+function blankStyle(row: OrderRow): StyleRec {
+  return {
+    styleColor: row.styleColor,
+    productName: row.productName,
+    franchise: row.franchise,
+    run: row.run,
+    matched: false,
+    depth: 0,
+    pairs: 0,
+    wholesaleTotal: 0,
+    retailTotal: 0,
+    sizes: [],
+  };
 }
