@@ -70,6 +70,7 @@ interface RunGroup {
   onOrder: number;
   sold: number;
   skuCount: number;
+  reorderCount: number;
 }
 
 function agg(skus: NikeSku[]) {
@@ -81,6 +82,65 @@ function agg(skus: NikeSku[]) {
 }
 function sellThru(sold: number, onHand: number): number {
   return sold + onHand > 0 ? sold / (sold + onHand) : 0;
+}
+
+// ─── Status signals (make opportunities and dead weight pop) ──────────────────
+
+type SignalKey = "reorder" | "selling" | "over" | "healthy" | "none";
+
+function getSignal(sold: number, onHand: number, onOrder: number): SignalKey {
+  if (sold <= 0) return onHand > 0 ? "over" : "none";
+  if (sold > onHand + onOrder) return "reorder"; // selling beyond coverage
+  if (sellThru(sold, onHand) >= 0.5) return "selling"; // moving well, covered
+  if (onHand >= 6 && sellThru(sold, onHand) < 0.2) return "over";
+  return "healthy";
+}
+
+const ACCENT: Record<SignalKey, string> = {
+  reorder: "border-emerald-400",
+  selling: "border-sky-200",
+  over: "border-slate-300",
+  healthy: "border-transparent",
+  none: "border-transparent",
+};
+
+const CHIP: Partial<Record<SignalKey, { label: string; cls: string }>> = {
+  reorder: { label: "Reorder", cls: "bg-emerald-100 text-emerald-800" },
+  over: { label: "Overstock", cls: "bg-slate-100 text-slate-500" },
+};
+
+function SignalChip({ signal }: { signal: SignalKey }) {
+  const chip = CHIP[signal];
+  if (!chip) return null;
+  return (
+    <span
+      className={`ml-2 align-middle rounded-full px-1.5 py-0.5 text-[10px] font-medium ${chip.cls}`}
+    >
+      {chip.label}
+    </span>
+  );
+}
+
+function SellThruBar({ value }: { value: number }) {
+  const w = Math.round(value * 100);
+  const color =
+    value >= 0.6
+      ? "bg-emerald-500"
+      : value >= 0.35
+      ? "bg-lime-500"
+      : value >= 0.15
+      ? "bg-amber-500"
+      : "bg-rose-400";
+  return (
+    <div className="flex items-center gap-1.5 justify-end">
+      <div className="w-12 h-1.5 rounded-full bg-brand-cream-dark/50 overflow-hidden">
+        <div className={`h-full ${color}`} style={{ width: `${w}%` }} />
+      </div>
+      <span className="tabular-nums text-xs w-8 text-right text-brand-text/60">
+        {w}%
+      </span>
+    </div>
+  );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -221,6 +281,9 @@ export default function NikePlannerPage() {
         run: run,
         families,
         skuCount: list.length,
+        reorderCount: list.filter(
+          (k) => getSignal(k.sold, k.onHand, k.onOrder) === "reorder"
+        ).length,
         ...agg(list),
       });
     }
@@ -239,6 +302,15 @@ export default function NikePlannerPage() {
   }, [filtered]);
 
   const totals = useMemo(() => agg(filtered), [filtered]);
+
+  const reorderColorways = useMemo(
+    () =>
+      filtered.filter(
+        (k) => getSignal(k.sold, k.onHand, k.onOrder) === "reorder"
+      ),
+    [filtered]
+  );
+  const shortUnits = reorderColorways.reduce((s, k) => s + k.coverageGap, 0);
 
   // ─── Handlers ────────────────────────────────────────────────────────────────
 
@@ -270,6 +342,13 @@ export default function NikePlannerPage() {
       new Set(
         runGroups.flatMap((r) =>
           r.families.map((f) => `${r.run}::${f.family}`)
+        )
+      )
+    );
+    setExpandedSkus(
+      new Set(
+        runGroups.flatMap((r) =>
+          r.families.flatMap((f) => f.skus.map((s) => s.sku))
         )
       )
     );
@@ -373,6 +452,23 @@ export default function NikePlannerPage() {
                   )}`}
                 />
               </div>
+
+              {/* Insight banner */}
+              {view === "run" && reorderColorways.length > 0 && (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded px-4 py-2.5 mb-4 font-body text-sm">
+                  <span>
+                    <strong>{reorderColorways.length}</strong> colorways are
+                    selling beyond their on-hand + on-order coverage (
+                    <strong>{shortUnits}</strong> units short).
+                  </span>
+                  <button
+                    onClick={() => setView("reorder")}
+                    className="ml-auto text-emerald-700 font-medium hover:underline"
+                  >
+                    View reorder winners →
+                  </button>
+                </div>
+              )}
 
               {/* View toggle */}
               <div className="flex items-center gap-1 mb-3">
@@ -498,10 +594,12 @@ function Metrics({
   return (
     <>
       <td className="px-3 py-2 text-right tabular-nums">{onHand}</td>
-      <td className="px-3 py-2 text-right tabular-nums">{onOrder}</td>
+      <td className="px-3 py-2 text-right tabular-nums text-brand-text/60">
+        {onOrder || ""}
+      </td>
       <td className="px-3 py-2 text-right tabular-nums font-medium">{sold}</td>
-      <td className="px-3 py-2 text-right tabular-nums">
-        {pct(sellThru(sold, onHand))}
+      <td className="px-3 py-2">
+        <SellThruBar value={sellThru(sold, onHand)} />
       </td>
     </>
   );
@@ -601,6 +699,11 @@ function RunRow({
           <span className="font-body font-normal text-brand-text/40 text-xs">
             · {rg.families.length} styles · {rg.skuCount} colorways
           </span>
+          {rg.reorderCount > 0 && (
+            <span className="ml-2 align-middle rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10px] font-body font-medium">
+              {rg.reorderCount} to reorder
+            </span>
+          )}
         </td>
         <Metrics onHand={rg.onHand} onOrder={rg.onOrder} sold={rg.sold} />
       </tr>
@@ -646,7 +749,11 @@ function FamilyRow({
         onClick={() => onToggleFamily(fkey)}
         className="cursor-pointer select-none hover:bg-brand-cream/40 border-b border-brand-cream transition-colors"
       >
-        <td className="py-2 pl-8 pr-3 text-brand-text/30">
+        <td
+          className={`py-2 pl-8 pr-3 text-brand-text/30 border-l-4 ${
+            ACCENT[getSignal(fg.sold, fg.onHand, fg.onOrder)]
+          }`}
+        >
           <ChevronRight
             className={`w-3.5 h-3.5 transition-transform ${famOpen ? "rotate-90" : ""}`}
           />
@@ -656,6 +763,7 @@ function FamilyRow({
           <span className="font-normal text-brand-text/40 text-xs">
             · {fg.skus.length}
           </span>
+          <SignalChip signal={getSignal(fg.sold, fg.onHand, fg.onOrder)} />
         </td>
         <Metrics onHand={fg.onHand} onOrder={fg.onOrder} sold={fg.sold} />
       </tr>
@@ -696,7 +804,11 @@ function SkuRow({
         onClick={() => onToggleSku(sku.sku)}
         className="cursor-pointer select-none hover:bg-brand-cream/30 border-b border-brand-cream transition-colors"
       >
-        <td className="py-1.5 pl-14 pr-3 text-brand-text/30">
+        <td
+          className={`py-1.5 pl-14 pr-3 text-brand-text/30 border-l-4 ${
+            ACCENT[getSignal(sku.sold, sku.onHand, sku.onOrder)]
+          }`}
+        >
           <ChevronRight
             className={`w-3 h-3 transition-transform ${skuOpen ? "rotate-90" : ""}`}
           />
@@ -704,6 +816,7 @@ function SkuRow({
         <td className="px-3 py-1.5 text-brand-text/80">
           {sku.color || sku.description || sku.sku}{" "}
           <span className="text-brand-text/30 text-xs">{sku.gender}</span>
+          <SignalChip signal={getSignal(sku.sold, sku.onHand, sku.onOrder)} />
         </td>
         <Metrics onHand={sku.onHand} onOrder={sku.onOrder} sold={sku.sold} />
       </tr>
