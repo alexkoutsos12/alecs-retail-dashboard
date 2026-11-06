@@ -9,7 +9,7 @@ import {
   ChangeEvent,
 } from "react";
 import Link from "next/link";
-import { Upload, CheckCircle, AlertCircle, Trash2 } from "lucide-react";
+import { Upload, CheckCircle, AlertCircle, Trash2, FileText } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { canDeleteReport } from "@/lib/permissions";
 import { db, storage } from "@/lib/firebase";
@@ -241,6 +241,39 @@ export default function NikePlannerImportPage() {
       <p className="text-brand-text/50 font-body text-sm mb-6">
         Upload a RICS Stock Status export (.csv) for NIKE
       </p>
+
+      {/* How to run the report */}
+      <div className="bg-brand-cream/40 border border-brand-cream-dark rounded p-5 mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <FileText className="w-4 h-4 text-brand-green shrink-0" />
+          <h2 className="font-heading text-brand-green text-sm font-bold">
+            How to run this report in RICS
+          </h2>
+        </div>
+        <ol className="list-decimal pl-5 space-y-1.5 font-body text-sm text-brand-text/80">
+          <li>
+            Open the <strong>Stock Status</strong> report.
+          </li>
+          <li>
+            Change the format to <strong>CSV</strong>.
+          </li>
+          <li>
+            Under <strong>Report Criteria</strong>, select{" "}
+            <strong>NIKE</strong> as the supplier, and under{" "}
+            <strong>By Class</strong> select all kids shoes.
+          </li>
+          <li>Include or omit outlet stock — your choice.</li>
+          <li>
+            Under <strong>Printing Options</strong>, select{" "}
+            <strong>On Hand</strong>, <strong>Costs</strong>, and{" "}
+            <strong>Age</strong>.
+          </li>
+          <li>
+            Optionally include <strong>Sell-Through</strong> data for a selected
+            time frame (set the matching sales period below when you upload).
+          </li>
+        </ol>
+      </div>
 
       {/* Delete confirmation dialog */}
       {deleteDialog && (
