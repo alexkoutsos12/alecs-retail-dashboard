@@ -882,13 +882,9 @@ function RunSection({
         <>
           {/* Run-level summary box */}
           <div className="rounded-lg border-2 border-brand-green/30 bg-white overflow-hidden">
-            <FamilySizeSummary
+            <SummaryBlock
               skus={rg.families.flatMap((f) => f.skus)}
-              label={`${rg.run} size summary · all ${rg.skuCount} colorways across ${rg.families.length} styles`}
-            />
-            <OnOrderSummary
-              skus={rg.families.flatMap((f) => f.skus)}
-              label={`${rg.run} on order`}
+              label={`${rg.run} summary · all ${rg.skuCount} colorways across ${rg.families.length} styles`}
             />
           </div>
 
@@ -955,8 +951,7 @@ function StyleSection({
 
       {famOpen && (
         <div className="border-t border-brand-cream-dark">
-          <FamilySizeSummary skus={fg.skus} />
-          <OnOrderSummary skus={fg.skus} label={`${fg.family} on order`} />
+          <SummaryBlock skus={fg.skus} />
           {fg.skus.map((sku) => (
             <SkuRow
               key={sku.sku}
@@ -1163,22 +1158,79 @@ function heat(n: number, scale: "stock" | "sold"): string {
   return arr[idx];
 }
 
-function FamilySizeSummary({
+interface PoCurveRow {
+  poNumber: string;
+  shipDate: string;
+  shipSort: string;
+  bySize: Map<number, number>;
+  total: number;
+}
+
+/** Aggregate every purchase order feeding the given SKUs, grouped by PO. */
+function onOrderSummary(skus: PlannerSku[]): {
+  rows: PoCurveRow[];
+  totalBySize: Map<number, number>;
+  grandTotal: number;
+} {
+  const poMap = new Map<string, PoCurveRow>();
+  for (const k of skus) {
+    for (const po of k.pos ?? []) {
+      let row = poMap.get(po.poNumber);
+      if (!row) {
+        row = {
+          poNumber: po.poNumber,
+          shipDate: po.shipDate,
+          shipSort: po.shipSort,
+          bySize: new Map(),
+          total: 0,
+        };
+        poMap.set(po.poNumber, row);
+      }
+      for (const s of po.sizes) {
+        if (s.open <= 0) continue;
+        row.bySize.set(s.code, (row.bySize.get(s.code) || 0) + s.open);
+        row.total += s.open;
+      }
+    }
+  }
+  const rows = [...poMap.values()].sort(
+    (a, b) =>
+      a.shipSort.localeCompare(b.shipSort) ||
+      a.poNumber.localeCompare(b.poNumber)
+  );
+  const totalBySize = new Map<number, number>();
+  let grandTotal = 0;
+  for (const r of rows) {
+    for (const [code, q] of r.bySize) {
+      totalBySize.set(code, (totalBySize.get(code) || 0) + q);
+      grandTotal += q;
+    }
+  }
+  return { rows, totalBySize, grandTotal };
+}
+
+/**
+ * One combined summary block: on-hand and sold by size up top, then each open
+ * purchase order broken out by size (the on-order detail) and an "All POs"
+ * total — all sharing the same size columns so it reads as a single section.
+ */
+function SummaryBlock({
   skus,
   label,
 }: {
-  skus: NikeSku[];
+  skus: PlannerSku[];
   label?: string;
 }) {
   const curve = familyCurve(skus);
   if (curve.length === 0) return null;
+  const { rows: poRows, totalBySize, grandTotal } = onOrderSummary(skus);
   const totOh = curve.reduce((s, c) => s + c.onHand, 0);
-  const totOo = curve.reduce((s, c) => s + c.onOrder, 0);
   const totSo = curve.reduce((s, c) => s + c.sold, 0);
+  const span = curve.length + 2;
   return (
-    <div className="bg-white px-4 py-3 border-y border-brand-cream-dark">
+    <div className="bg-white px-4 py-3">
       <p className="font-body text-[11px] uppercase tracking-wider text-brand-text/40 mb-2">
-        {label ?? `Size summary · all ${skus.length} colorways`}
+        {label ?? `Summary · all ${skus.length} colorways`}
       </p>
       <div className="overflow-x-auto">
         <table className="text-xs font-body">
@@ -1193,12 +1245,13 @@ function FamilySizeSummary({
                   {c.label}
                 </th>
               ))}
-              <th className="pl-3 py-1 text-center font-semibold text-brand-text/50">
+              <th className="pl-3 py-1 text-center font-semibold text-brand-text/50 border-l border-brand-cream-dark">
                 Tot
               </th>
             </tr>
           </thead>
           <tbody>
+            {/* On hand */}
             <tr>
               <td className="pr-3 py-0.5 text-right text-brand-text/50">
                 On hand
@@ -1218,10 +1271,11 @@ function FamilySizeSummary({
                   </td>
                 );
               })}
-              <td className="pl-3 py-1 text-center tabular-nums font-semibold">
+              <td className="pl-3 py-1 text-center tabular-nums font-semibold border-l border-brand-cream-dark">
                 {totOh}
               </td>
             </tr>
+            {/* Sold */}
             <tr>
               <td className="pr-3 py-0.5 text-right text-brand-text/50">Sold</td>
               {curve.map((c) => (
@@ -1235,161 +1289,96 @@ function FamilySizeSummary({
                   {c.sold || ""}
                 </td>
               ))}
-              <td className="pl-3 py-1 text-center tabular-nums font-semibold">
+              <td className="pl-3 py-1 text-center tabular-nums font-semibold border-l border-brand-cream-dark">
                 {totSo}
               </td>
             </tr>
-            <tr className="text-brand-text/50">
-              <td className="pr-3 py-0.5 text-right">On order</td>
-              {curve.map((c) => (
-                <td key={c.code} className="px-1.5 py-1 text-center tabular-nums">
-                  {c.onOrder || ""}
-                </td>
-              ))}
-              <td className="pl-3 py-1 text-center tabular-nums">{totOo}</td>
+
+            {/* On-order section header */}
+            <tr>
+              <td
+                colSpan={span}
+                className="pt-3 pb-1 text-indigo-500 font-medium"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 rounded-full bg-indigo-500" />
+                  On order · {poRows.length} purchase order
+                  {poRows.length === 1 ? "" : "s"} · {grandTotal} pairs incoming
+                </span>
+              </td>
             </tr>
+
+            {poRows.length > 0 ? (
+              <>
+                {poRows.map((r) => (
+                  <tr
+                    key={r.poNumber}
+                    className="bg-indigo-50/70 border-t border-indigo-100"
+                  >
+                    <td className="pr-3 py-0.5 text-right whitespace-nowrap text-indigo-700">
+                      <span className="font-semibold">PO {r.poNumber}</span>
+                      {r.shipDate && (
+                        <span className="text-indigo-400">
+                          {" "}
+                          · {plainDate(r.shipDate)}
+                        </span>
+                      )}
+                    </td>
+                    {curve.map((c) => {
+                      const q = r.bySize.get(c.code) || 0;
+                      return (
+                        <td
+                          key={c.code}
+                          className={`px-1.5 py-1 text-center tabular-nums ${
+                            q > 0
+                              ? "bg-indigo-100 text-indigo-800 font-medium"
+                              : "text-indigo-200"
+                          }`}
+                        >
+                          {q || ""}
+                        </td>
+                      );
+                    })}
+                    <td className="pl-3 py-1 text-center tabular-nums font-semibold text-indigo-800 border-l border-indigo-200">
+                      {r.total}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="bg-indigo-50/70 border-t-2 border-indigo-200 font-semibold text-indigo-800">
+                  <td className="pr-3 py-1 text-right">All POs</td>
+                  {curve.map((c) => (
+                    <td
+                      key={c.code}
+                      className="px-1.5 py-1 text-center tabular-nums"
+                    >
+                      {totalBySize.get(c.code) || ""}
+                    </td>
+                  ))}
+                  <td className="pl-3 py-1 text-center tabular-nums border-l border-indigo-200">
+                    {grandTotal}
+                  </td>
+                </tr>
+              </>
+            ) : (
+              <tr className="bg-indigo-50/40">
+                <td
+                  colSpan={span}
+                  className="py-1 text-indigo-400 text-[11px]"
+                >
+                  No open purchase orders for this group.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
       <p className="text-[11px] text-brand-text/40 mt-2">
         Darker green = more on hand · darker amber = more sold · red 0 = sold
-        with none on hand (size gap to chase).
-      </p>
-    </div>
-  );
-}
-
-// ─── On-order summary (distinct grid analysis for incoming stock) ────────────
-
-interface PoCurveRow {
-  poNumber: string;
-  shipDate: string;
-  shipSort: string;
-  bySize: Map<number, number>;
-  total: number;
-}
-
-/** Aggregate every purchase order feeding the given SKUs, grouped by PO. */
-function onOrderSummary(skus: PlannerSku[]): {
-  columns: { code: number; label: string; order: number }[];
-  rows: PoCurveRow[];
-  totalBySize: Map<number, number>;
-  grandTotal: number;
-} {
-  const colMap = new Map<number, { code: number; label: string; order: number }>();
-  const poMap = new Map<string, PoCurveRow>();
-  for (const k of skus) {
-    for (const po of k.pos ?? []) {
-      let row = poMap.get(po.poNumber);
-      if (!row) {
-        row = {
-          poNumber: po.poNumber,
-          shipDate: po.shipDate,
-          shipSort: po.shipSort,
-          bySize: new Map(),
-          total: 0,
-        };
-        poMap.set(po.poNumber, row);
-      }
-      for (const s of po.sizes) {
-        if (s.open <= 0) continue;
-        if (!colMap.has(s.code))
-          colMap.set(s.code, { code: s.code, label: s.label, order: s.order });
-        row.bySize.set(s.code, (row.bySize.get(s.code) || 0) + s.open);
-        row.total += s.open;
-      }
-    }
-  }
-  const columns = [...colMap.values()].sort((a, b) => a.order - b.order);
-  const rows = [...poMap.values()].sort(
-    (a, b) => a.shipSort.localeCompare(b.shipSort) || a.poNumber.localeCompare(b.poNumber)
-  );
-  const totalBySize = new Map<number, number>();
-  let grandTotal = 0;
-  for (const r of rows) {
-    for (const [code, q] of r.bySize) {
-      totalBySize.set(code, (totalBySize.get(code) || 0) + q);
-      grandTotal += q;
-    }
-  }
-  return { columns, rows, totalBySize, grandTotal };
-}
-
-function OnOrderSummary({ skus, label }: { skus: PlannerSku[]; label?: string }) {
-  const { columns, rows, totalBySize, grandTotal } = onOrderSummary(skus);
-  if (rows.length === 0) return null;
-  return (
-    <div className="bg-indigo-50/60 px-4 py-3 border-y-2 border-indigo-200">
-      <p className="font-body text-[11px] uppercase tracking-wider text-indigo-500 mb-2 flex items-center gap-2">
-        <span className="inline-block w-2 h-2 rounded-full bg-indigo-500" />
-        {label ?? "On order"} · {rows.length} purchase order
-        {rows.length === 1 ? "" : "s"} · {grandTotal} pairs incoming
-      </p>
-      <div className="overflow-x-auto">
-        <table className="text-xs font-body">
-          <thead>
-            <tr className="text-indigo-400">
-              <th className="pr-3 py-1 text-left font-normal">PO · ship date</th>
-              {columns.map((c) => (
-                <th
-                  key={c.code}
-                  className="px-1.5 py-1 text-center font-semibold text-indigo-600 min-w-[34px]"
-                >
-                  {c.label}
-                </th>
-              ))}
-              <th className="pl-3 py-1 text-center font-semibold text-indigo-500">
-                Tot
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.poNumber} className="border-t border-indigo-100">
-                <td className="pr-3 py-0.5 text-left whitespace-nowrap text-indigo-700">
-                  <span className="font-semibold">PO {r.poNumber}</span>
-                  {r.shipDate && (
-                    <span className="text-indigo-400">
-                      {" "}
-                      · {plainDate(r.shipDate)}
-                    </span>
-                  )}
-                </td>
-                {columns.map((c) => {
-                  const q = r.bySize.get(c.code) || 0;
-                  return (
-                    <td
-                      key={c.code}
-                      className={`px-1.5 py-1 text-center tabular-nums ${
-                        q > 0
-                          ? "bg-indigo-100 text-indigo-800 font-medium"
-                          : "text-indigo-200"
-                      }`}
-                    >
-                      {q || ""}
-                    </td>
-                  );
-                })}
-                <td className="pl-3 py-1 text-center tabular-nums font-semibold text-indigo-700">
-                  {r.total}
-                </td>
-              </tr>
-            ))}
-            <tr className="border-t-2 border-indigo-200 font-semibold text-indigo-800">
-              <td className="pr-3 py-1 text-left">All POs</td>
-              {columns.map((c) => (
-                <td key={c.code} className="px-1.5 py-1 text-center tabular-nums">
-                  {totalBySize.get(c.code) || ""}
-                </td>
-              ))}
-              <td className="pl-3 py-1 text-center tabular-nums">{grandTotal}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p className="text-[11px] text-indigo-400 mt-2">
-        Each row is one purchase order — pairs coming in by size, with its ship
-        date. Darker cell = pairs on that order.
+        with none on hand (size gap to chase).{" "}
+        <span className="text-indigo-500">
+          Indigo rows = each open purchase order's pairs by size, with ship
+          date.
+        </span>
       </p>
     </div>
   );
