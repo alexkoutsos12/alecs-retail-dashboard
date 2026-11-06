@@ -134,11 +134,6 @@ export const appModules: AppModule[] = [
     firestoreModule: "nike-planner",
     navItems: [
       { label: "Planner", href: "/nike-planner/planner", icon: "Footprints" },
-      {
-        label: "Order Builder",
-        href: "/nike-planner/order-builder",
-        icon: "ClipboardList",
-      },
       { label: "Import Stock", href: "/nike-planner/import", icon: "Upload" },
       {
         label: "Import On-Order",
@@ -149,7 +144,6 @@ export const appModules: AppModule[] = [
     importRoute: "/nike-planner/import",
     reportRoutes: [
       { label: "Planner →", href: "/nike-planner/planner" },
-      { label: "Order Builder →", href: "/nike-planner/order-builder" },
     ],
   },
   {
