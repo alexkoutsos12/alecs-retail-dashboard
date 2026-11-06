@@ -63,18 +63,18 @@ function mergeOnOrder(
   onOrder: OnOrderSku[]
 ): PlannerSku[] {
   const ooMap = new Map(onOrder.map((o) => [o.sku, o]));
-  // When an on-order report is loaded it is the single source of truth for
-  // on-order: every SKU's on-order is rebuilt from it (0 if the SKU has no open
-  // purchase order), so the size-summary "On order" row reconciles exactly with
-  // the per-PO grid. The stock report's own on-order column is not mixed in.
-  const hasOnOrder = onOrder.length > 0;
+  // The on-order report is the single source of truth for on-order. Every SKU's
+  // on-order is taken from it — the stock-status report's on-order column is
+  // always disregarded, because the PO report is the precise, detailed
+  // breakdown. A SKU with no open PO therefore shows nothing on order, and the
+  // size-summary "On order" row reconciles exactly with the per-PO grid.
   const out: PlannerSku[] = [];
   const seen = new Set<string>();
   for (const s of stock) {
     seen.add(s.sku);
     const oo = ooMap.get(s.sku);
     if (!oo) {
-      if (hasOnOrder && (s.onOrder > 0 || s.sizes.some((z) => z.onOrder > 0))) {
+      if (s.onOrder > 0 || s.sizes.some((z) => z.onOrder > 0)) {
         out.push({
           ...s,
           onOrder: 0,
@@ -126,6 +126,28 @@ interface ReportMeta {
 
 function pct(n: number): string {
   return `${Math.round(n * 100)}%`;
+}
+
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/**
+ * Render a ship date plainly, whatever form it was stored in. Older imports
+ * saved the Excel date serial (e.g. "46296") the CSV reader produced; newer
+ * ones store "Mar 1, 2027". This normalizes both (and raw "M/D/YYYY").
+ */
+function plainDate(v: string): string {
+  if (!v) return "";
+  if (/^\d+$/.test(v)) {
+    const d = new Date((parseInt(v, 10) - 25569) * 86400000);
+    if (!Number.isNaN(d.getTime()))
+      return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+  }
+  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${MONTHS[+m[1] - 1]} ${+m[2]}, ${m[3]}`;
+  return v;
 }
 
 /** Sizes selling faster than they're stocked — the reorder candidates. */
@@ -878,17 +900,21 @@ function FamilyRow({
     <>
       <tr
         onClick={() => onToggleFamily(fkey)}
-        className="cursor-pointer select-none hover:bg-brand-cream/40 border-b border-brand-cream transition-colors"
+        className={`cursor-pointer select-none border-t-2 border-brand-cream-dark transition-colors ${
+          famOpen
+            ? "bg-brand-cream/60 hover:bg-brand-cream/70"
+            : "bg-brand-cream/25 hover:bg-brand-cream/50"
+        }`}
       >
-        <td className="py-2 pl-8 pr-3 text-brand-text/30">
+        <td className="py-2.5 pl-8 pr-3 text-brand-green/50">
           <ChevronRight
-            className={`w-3.5 h-3.5 transition-transform ${famOpen ? "rotate-90" : ""}`}
+            className={`w-4 h-4 transition-transform ${famOpen ? "rotate-90" : ""}`}
           />
         </td>
-        <td className="px-3 py-2 font-medium text-brand-text">
+        <td className="px-3 py-2.5 font-heading font-semibold text-brand-text">
           {fg.family}{" "}
-          <span className="font-normal text-brand-text/40 text-xs">
-            · {fg.skus.length}
+          <span className="font-body font-normal text-brand-text/40 text-xs">
+            · {fg.skus.length} colorway{fg.skus.length === 1 ? "" : "s"}
           </span>
         </td>
         <Metrics onHand={fg.onHand} onOrder={fg.onOrder} sold={fg.sold} />
@@ -1296,7 +1322,10 @@ function OnOrderSummary({ skus, label }: { skus: PlannerSku[]; label?: string })
                 <td className="pr-3 py-0.5 text-left whitespace-nowrap text-indigo-700">
                   <span className="font-semibold">PO {r.poNumber}</span>
                   {r.shipDate && (
-                    <span className="text-indigo-400"> · {r.shipDate}</span>
+                    <span className="text-indigo-400">
+                      {" "}
+                      · {plainDate(r.shipDate)}
+                    </span>
                   )}
                 </td>
                 {columns.map((c) => {
@@ -1422,7 +1451,7 @@ function SizeGrid({ sku }: { sku: PlannerSku }) {
                       {po.shipDate && (
                         <span className="text-indigo-400">
                           {" "}
-                          · {po.shipDate}
+                          · {plainDate(po.shipDate)}
                         </span>
                       )}
                     </td>
