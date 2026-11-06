@@ -257,7 +257,15 @@ export default function NikePlannerPage() {
   const [onOrderFilter, setOnOrderFilter] = useState<"all" | "on" | "off">(
     "all"
   );
+  const [classFilter, setClassFilter] = useState<string>("All");
   const [search, setSearch] = useState("");
+
+  // Distinct classes present in the current snapshot, for the class filter.
+  const classOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const k of skus) if (k.className) set.add(k.className);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [skus]);
 
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
   const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(
@@ -360,6 +368,7 @@ export default function NikePlannerPage() {
     return skus.filter((k) => {
       if (runFilter !== "All" && k.run !== runFilter) return false;
       if (genderFilter !== "All" && k.gender !== genderFilter) return false;
+      if (classFilter !== "All" && k.className !== classFilter) return false;
       const hasOnOrder = (k.pos && k.pos.length > 0) || k.onOrder > 0;
       if (onOrderFilter === "on" && !hasOnOrder) return false;
       if (onOrderFilter === "off" && hasOnOrder) return false;
@@ -373,7 +382,7 @@ export default function NikePlannerPage() {
         return false;
       return true;
     });
-  }, [skus, runFilter, genderFilter, onOrderFilter, search]);
+  }, [skus, runFilter, genderFilter, classFilter, onOrderFilter, search]);
 
   const runGroups = useMemo<RunGroup[]>(() => {
     const byRun = new Map<string, PlannerSku[]>();
@@ -650,7 +659,7 @@ export default function NikePlannerPage() {
                   )}
                 </div>
                 <div className="flex gap-1">
-                  {(["All", "Boys", "Girls", "Unisex"] as const).map((g) => (
+                  {(["All", "Boys", "Girls"] as const).map((g) => (
                     <button
                       key={g}
                       onClick={() => setGenderFilter(g as Gender | "All")}
@@ -686,6 +695,27 @@ export default function NikePlannerPage() {
                       {lbl}
                     </button>
                   ))}
+                </div>
+                <div className="flex items-center gap-1.5 border-l border-brand-cream-dark pl-2 ml-1">
+                  <span className="font-body text-[11px] text-brand-text/40">
+                    Class
+                  </span>
+                  <select
+                    value={classFilter}
+                    onChange={(e) => setClassFilter(e.target.value)}
+                    className={`font-body text-xs rounded px-2 py-1 border focus:outline-none focus:border-brand-green ${
+                      classFilter === "All"
+                        ? "bg-brand-cream text-brand-text/70 border-brand-cream-dark"
+                        : "bg-brand-green text-brand-cream border-brand-green"
+                    }`}
+                  >
+                    <option value="All">All classes</option>
+                    {classOptions.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <label className="flex items-center gap-1.5 ml-auto border border-brand-cream-dark rounded px-2 py-1">
                   <Search className="w-3.5 h-3.5 text-brand-text/40" />
@@ -1369,6 +1399,9 @@ function OnOrderSummary({ skus, label }: { skus: PlannerSku[]; label?: string })
 
 function SizeGrid({ sku }: { sku: PlannerSku }) {
   const pos = sku.pos ?? [];
+  const ohTot = sku.sizes.reduce((a, s) => a + s.onHand, 0);
+  const soldTot = sku.sizes.reduce((a, s) => a + s.sold, 0);
+  const ooTot = sku.sizes.reduce((a, s) => a + s.onOrder, 0);
   return (
     <div className="bg-brand-cream/30 px-4 py-3">
       <div className="flex flex-wrap gap-4 text-xs font-body text-brand-text/50 mb-2">
@@ -1402,6 +1435,9 @@ function SizeGrid({ sku }: { sku: PlannerSku }) {
                   {s.label}
                 </td>
               ))}
+              <td className="pl-3 py-0.5 text-center font-semibold text-brand-text/50 border-l border-brand-cream-dark">
+                Tot
+              </td>
             </tr>
             <tr>
               <td className="pr-2 py-0.5 text-brand-text/40 text-right">On hand</td>
@@ -1417,6 +1453,9 @@ function SizeGrid({ sku }: { sku: PlannerSku }) {
                   {s.onHand || ""}
                 </td>
               ))}
+              <td className="pl-3 py-0.5 text-center tabular-nums font-semibold border-l border-brand-cream-dark">
+                {ohTot}
+              </td>
             </tr>
             <tr>
               <td className="pr-2 py-0.5 text-brand-text/40 text-right">Sold</td>
@@ -1432,6 +1471,9 @@ function SizeGrid({ sku }: { sku: PlannerSku }) {
                   {s.sold || ""}
                 </td>
               ))}
+              <td className="pl-3 py-0.5 text-center tabular-nums font-semibold border-l border-brand-cream-dark">
+                {soldTot}
+              </td>
             </tr>
             {pos.length > 0 ? (
               pos.map((po, i) => {
@@ -1467,6 +1509,9 @@ function SizeGrid({ sku }: { sku: PlannerSku }) {
                         </td>
                       );
                     })}
+                    <td className="pl-3 py-0.5 text-center tabular-nums font-semibold text-indigo-800 border-l border-indigo-200">
+                      {po.total}
+                    </td>
                   </tr>
                 );
               })
@@ -1483,6 +1528,9 @@ function SizeGrid({ sku }: { sku: PlannerSku }) {
                     {s.onOrder || ""}
                   </td>
                 ))}
+                <td className="pl-3 py-0.5 text-center tabular-nums font-semibold text-brand-text/60 border-l border-brand-cream-dark">
+                  {ooTot || ""}
+                </td>
               </tr>
             )}
           </tbody>
