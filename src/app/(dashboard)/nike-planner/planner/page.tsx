@@ -63,12 +63,48 @@ function mergeOnOrder(
   onOrder: OnOrderSku[]
 ): PlannerSku[] {
   const ooMap = new Map(onOrder.map((o) => [o.sku, o]));
+  // When an on-order report is loaded it is the single source of truth for
+  // on-order: every SKU's on-order is rebuilt from it (0 if the SKU has no open
+  // purchase order), so the size-summary "On order" row reconciles exactly with
+  // the per-PO grid. The stock report's own on-order column is not mixed in.
+  const hasOnOrder = onOrder.length > 0;
   const out: PlannerSku[] = [];
   const seen = new Set<string>();
   for (const s of stock) {
     seen.add(s.sku);
     const oo = ooMap.get(s.sku);
-    out.push(oo ? { ...s, pos: oo.pos } : s);
+    if (!oo) {
+      if (hasOnOrder && (s.onOrder > 0 || s.sizes.some((z) => z.onOrder > 0))) {
+        out.push({
+          ...s,
+          onOrder: 0,
+          sizes: s.sizes.map((z) => ({ ...z, onOrder: 0 })),
+        });
+      } else {
+        out.push(s);
+      }
+      continue;
+    }
+    // Rebuild sizes: keep on-hand/sold from stock, take on-order from the CSV,
+    // and add any size only seen on order so no incoming pairs are dropped.
+    const sizeMap = new Map(
+      s.sizes.map((z) => [z.code, { ...z, onOrder: 0 }])
+    );
+    for (const z of oo.sizes) {
+      const ex = sizeMap.get(z.code);
+      if (ex) ex.onOrder = z.onOrder;
+      else
+        sizeMap.set(z.code, {
+          code: z.code,
+          label: z.label,
+          order: z.order,
+          onHand: 0,
+          onOrder: z.onOrder,
+          sold: 0,
+        });
+    }
+    const sizes = [...sizeMap.values()].sort((a, b) => a.order - b.order);
+    out.push({ ...s, sizes, onOrder: oo.onOrder, pos: oo.pos });
   }
   for (const oo of onOrder) {
     if (!seen.has(oo.sku)) out.push(onOrderToSku(oo));
@@ -150,31 +186,6 @@ function getSignal(sold: number, onHand: number, onOrder: number): SignalKey {
   if (sellThru(sold, onHand) >= 0.5) return "selling"; // moving well, covered
   if (onHand >= 6 && sellThru(sold, onHand) < 0.2) return "over";
   return "healthy";
-}
-
-const ACCENT: Record<SignalKey, string> = {
-  reorder: "border-emerald-400",
-  selling: "border-sky-200",
-  over: "border-slate-300",
-  healthy: "border-transparent",
-  none: "border-transparent",
-};
-
-const CHIP: Partial<Record<SignalKey, { label: string; cls: string }>> = {
-  reorder: { label: "Reorder", cls: "bg-emerald-100 text-emerald-800" },
-  over: { label: "Overstock", cls: "bg-slate-100 text-slate-500" },
-};
-
-function SignalChip({ signal }: { signal: SignalKey }) {
-  const chip = CHIP[signal];
-  if (!chip) return null;
-  return (
-    <span
-      className={`ml-2 align-middle rounded-full px-1.5 py-0.5 text-[10px] font-medium ${chip.cls}`}
-    >
-      {chip.label}
-    </span>
-  );
 }
 
 function SellThruBar({ value }: { value: number }) {
@@ -809,11 +820,6 @@ function RunRow({
           <span className="font-body font-normal text-brand-text/40 text-xs">
             · {rg.families.length} styles · {rg.skuCount} colorways
           </span>
-          {rg.reorderCount > 0 && (
-            <span className="ml-2 align-middle rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10px] font-body font-medium">
-              {rg.reorderCount} to reorder
-            </span>
-          )}
         </td>
         <Metrics onHand={rg.onHand} onOrder={rg.onOrder} sold={rg.sold} />
       </tr>
@@ -874,11 +880,7 @@ function FamilyRow({
         onClick={() => onToggleFamily(fkey)}
         className="cursor-pointer select-none hover:bg-brand-cream/40 border-b border-brand-cream transition-colors"
       >
-        <td
-          className={`py-2 pl-8 pr-3 text-brand-text/30 border-l-4 ${
-            ACCENT[getSignal(fg.sold, fg.onHand, fg.onOrder)]
-          }`}
-        >
+        <td className="py-2 pl-8 pr-3 text-brand-text/30">
           <ChevronRight
             className={`w-3.5 h-3.5 transition-transform ${famOpen ? "rotate-90" : ""}`}
           />
@@ -888,7 +890,6 @@ function FamilyRow({
           <span className="font-normal text-brand-text/40 text-xs">
             · {fg.skus.length}
           </span>
-          <SignalChip signal={getSignal(fg.sold, fg.onHand, fg.onOrder)} />
         </td>
         <Metrics onHand={fg.onHand} onOrder={fg.onOrder} sold={fg.sold} />
       </tr>
@@ -930,11 +931,7 @@ function SkuRow({
         onClick={() => onToggleSku(sku.sku)}
         className="cursor-pointer select-none hover:bg-brand-cream/30 border-b border-brand-cream transition-colors"
       >
-        <td
-          className={`py-1.5 pl-14 pr-3 text-brand-text/30 border-l-4 ${
-            ACCENT[getSignal(sku.sold, sku.onHand, sku.onOrder)]
-          }`}
-        >
+        <td className="py-1.5 pl-14 pr-3 text-brand-text/30">
           <ChevronRight
             className={`w-3 h-3 transition-transform ${skuOpen ? "rotate-90" : ""}`}
           />
@@ -942,7 +939,6 @@ function SkuRow({
         <td className="px-3 py-1.5 text-brand-text/80">
           {sku.color || sku.description || sku.sku}{" "}
           <span className="text-brand-text/30 text-xs">{sku.gender}</span>
-          <SignalChip signal={getSignal(sku.sold, sku.onHand, sku.onOrder)} />
         </td>
         <Metrics onHand={sku.onHand} onOrder={sku.onOrder} sold={sku.sold} />
       </tr>

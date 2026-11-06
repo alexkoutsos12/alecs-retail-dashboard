@@ -63,16 +63,52 @@ function str(v: unknown): string {
   return v == null ? "" : String(v).trim();
 }
 
-/** "3/1/2027" -> "2027-03-01" for sorting; passthrough otherwise. */
-function shipSortKey(d: string): string {
-  const m = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!m) return d;
-  return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** Excel serial date (1900 system) -> JS Date (UTC). */
+function excelSerialToDate(n: number): Date {
+  return new Date((Math.round(n) - 25569) * 86400000);
+}
+
+/**
+ * Normalize a RICS ship/order date into a plain display string and a sortable
+ * key. The value may arrive as "M/D/YYYY" text, a JS Date, or — when the CSV is
+ * read through the spreadsheet engine — an Excel date serial number like 46054.
+ */
+function formatDate(v: unknown): { display: string; sort: string } {
+  let d: Date | null = null;
+  if (typeof v === "number" && v > 0) d = excelSerialToDate(v);
+  else if (v instanceof Date) d = v;
+  else {
+    const s = String(v ?? "").trim();
+    if (!s) return { display: "", sort: "" };
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) d = new Date(Date.UTC(+m[3], +m[1] - 1, +m[2]));
+    else if (/^\d+$/.test(s)) d = excelSerialToDate(+s);
+    else return { display: s, sort: s };
+  }
+  if (!d || Number.isNaN(d.getTime())) {
+    const s = String(v ?? "");
+    return { display: s, sort: s };
+  }
+  const y = d.getUTCFullYear();
+  const mo = d.getUTCMonth();
+  const day = d.getUTCDate();
+  return {
+    display: `${MONTHS[mo]} ${day}, ${y}`,
+    sort: `${y}-${String(mo + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+  };
 }
 
 interface Accum {
   first: Record<string, unknown>;
-  pos: Map<string, { shipDate: string; orderDate: string; sizes: Map<number, number> }>;
+  pos: Map<
+    string,
+    { shipDisplay: string; shipSort: string; orderDisplay: string; sizes: Map<number, number> }
+  >;
   sizes: Map<number, number>;
 }
 
@@ -90,17 +126,31 @@ export async function parseNikeOnOrder(
     return null;
   };
 
+  // Does the export carry an OpenQty column? When it does, it is authoritative:
+  // a blank means the line is fully received (0 still open), NOT "fall back to
+  // the ordered quantity" — otherwise received stock is double-counted as
+  // on-order. Only when the column is absent do we derive open = ordered − rcvd.
+  const hasOpenCol =
+    rows.length > 0 &&
+    Object.keys(rows[0]).some((k) => k.replace(/^﻿/, "").trim() === "OpenQty");
+
   const bySku = new Map<string, Accum>();
   for (const row of rows) {
     const sku = str(keyOf(row, "SKU"));
     if (!sku) continue;
     const code = Math.round(num(keyOf(row, "COL")));
     if (code <= 0) continue;
-    const openRaw = keyOf(row, "OpenQty");
-    const open =
-      openRaw != null && String(openRaw).trim() !== ""
-        ? num(openRaw)
-        : num(keyOf(row, "OrderedQty"));
+    let open: number;
+    if (hasOpenCol) {
+      const openRaw = keyOf(row, "OpenQty");
+      open =
+        openRaw == null || String(openRaw).trim() === "" ? 0 : num(openRaw);
+    } else {
+      open = Math.max(
+        0,
+        num(keyOf(row, "OrderedQty")) - num(keyOf(row, "RcvdQty"))
+      );
+    }
     if (open <= 0) continue;
 
     let acc = bySku.get(sku);
@@ -111,9 +161,11 @@ export async function parseNikeOnOrder(
     const poName = str(keyOf(row, "PONumber")) || "(no PO)";
     let po = acc.pos.get(poName);
     if (!po) {
+      const ship = formatDate(keyOf(row, "ShipDate"));
       po = {
-        shipDate: str(keyOf(row, "ShipDate")),
-        orderDate: str(keyOf(row, "OrderDate")),
+        shipDisplay: ship.display,
+        shipSort: ship.sort,
+        orderDisplay: formatDate(keyOf(row, "OrderDate")).display,
         sizes: new Map(),
       };
       acc.pos.set(poName, po);
@@ -142,9 +194,9 @@ export async function parseNikeOnOrder(
           .sort((a, b) => a.order - b.order);
         return {
           poNumber,
-          shipDate: p.shipDate,
-          shipSort: shipSortKey(p.shipDate),
-          orderDate: p.orderDate,
+          shipDate: p.shipDisplay,
+          shipSort: p.shipSort,
+          orderDate: p.orderDisplay,
           sizes,
           total: sizes.reduce((s, c) => s + c.open, 0),
         };
