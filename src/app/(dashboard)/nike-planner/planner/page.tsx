@@ -724,8 +724,14 @@ export default function NikePlannerPage() {
 }
 
 // ─── By Size Run view ────────────────────────────────────────────────────────
+// Laid out as a CSS grid (not a table) so each summary and each style can be a
+// self-contained bordered box, while the metric columns stay aligned across
+// every row via one shared column template.
 
-function Metrics({
+const GRID =
+  "grid grid-cols-[1.75rem_minmax(0,1fr)_3.25rem_3.25rem_3.25rem_5.5rem] items-center gap-x-2";
+
+function MetricCells({
   onHand,
   onOrder,
   sold,
@@ -736,14 +742,12 @@ function Metrics({
 }) {
   return (
     <>
-      <td className="px-3 py-2 text-right tabular-nums">{onHand}</td>
-      <td className="px-3 py-2 text-right tabular-nums text-brand-text/60">
+      <div className="text-right tabular-nums">{onHand}</div>
+      <div className="text-right tabular-nums text-brand-text/60">
         {onOrder || ""}
-      </td>
-      <td className="px-3 py-2 text-right tabular-nums font-medium">{sold}</td>
-      <td className="px-3 py-2">
-        <SellThruBar value={sellThru(sold, onHand)} />
-      </td>
+      </div>
+      <div className="text-right tabular-nums font-medium">{sold}</div>
+      <SellThruBar value={sellThru(sold, onHand)} />
     </>
   );
 }
@@ -775,41 +779,38 @@ function RunView({
     );
   }
   return (
-    <div className="bg-white border-l-[3px] border-brand-green rounded overflow-hidden overflow-x-auto">
-      <table className="w-full text-sm font-body min-w-[640px]">
-        <thead>
-          <tr className="border-b border-brand-cream-dark text-left text-brand-text/50">
-            <th className="w-8 px-3 py-2 font-normal" />
-            <th className="px-3 py-2 font-normal">Size Run / Style / Color</th>
-            <th className="px-3 py-2 font-normal text-right">On Hand</th>
-            <th className="px-3 py-2 font-normal text-right">On Order</th>
-            <th className="px-3 py-2 font-normal text-right">Sold</th>
-            <th className="px-3 py-2 font-normal text-right">Sell-thru</th>
-          </tr>
-        </thead>
-        <tbody>
-          {runGroups.map((rg) => {
-            const runOpen = expandedRuns.has(rg.run);
-            return (
-              <RunRow
-                key={rg.run}
-                rg={rg}
-                runOpen={runOpen}
-                expandedFamilies={expandedFamilies}
-                expandedSkus={expandedSkus}
-                onToggleRun={onToggleRun}
-                onToggleFamily={onToggleFamily}
-                onToggleSku={onToggleSku}
-              />
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="overflow-x-auto">
+      <div className="min-w-[680px] text-sm font-body space-y-6">
+        {/* Column header */}
+        <div
+          className={`${GRID} px-3 border-2 border-transparent text-brand-text/50 text-xs`}
+        >
+          <div />
+          <div>Size Run / Style / Color</div>
+          <div className="text-right">On Hand</div>
+          <div className="text-right">On Order</div>
+          <div className="text-right">Sold</div>
+          <div className="text-right">Sell-thru</div>
+        </div>
+
+        {runGroups.map((rg) => (
+          <RunSection
+            key={rg.run}
+            rg={rg}
+            runOpen={expandedRuns.has(rg.run)}
+            expandedFamilies={expandedFamilies}
+            expandedSkus={expandedSkus}
+            onToggleRun={onToggleRun}
+            onToggleFamily={onToggleFamily}
+            onToggleSku={onToggleSku}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
-function RunRow({
+function RunSection({
   rg,
   runOpen,
   expandedFamilies,
@@ -827,48 +828,49 @@ function RunRow({
   onToggleSku: (k: string) => void;
 }) {
   return (
-    <>
-      <tr
+    <section className="space-y-3">
+      {/* Run header bar */}
+      <div
         onClick={() => onToggleRun(rg.run)}
-        className="cursor-pointer select-none bg-brand-cream/40 hover:bg-brand-cream/70 border-t-2 border-brand-cream-dark transition-colors"
+        className={`${GRID} px-3 py-3 cursor-pointer select-none rounded-lg border-2 border-brand-green bg-brand-green/10 hover:bg-brand-green/15 transition-colors`}
       >
-        <td className="px-3 py-3 text-brand-text/40">
+        <div className="text-brand-green/60">
           <ChevronRight
             className={`w-5 h-5 transition-transform ${runOpen ? "rotate-90" : ""}`}
           />
-        </td>
-        <td className="px-3 py-3 font-heading font-bold text-brand-green text-[15px]">
+        </div>
+        <div className="font-heading font-bold text-brand-green text-[15px]">
           {rg.run}{" "}
           <span className="font-body font-normal text-brand-text/40 text-xs">
             · {rg.families.length} styles · {rg.skuCount} colorways
           </span>
-        </td>
-        <Metrics onHand={rg.onHand} onOrder={rg.onOrder} sold={rg.sold} />
-      </tr>
+        </div>
+        <MetricCells onHand={rg.onHand} onOrder={rg.onOrder} sold={rg.sold} />
+      </div>
 
       {runOpen && (
         <>
-          <tr className="border-b-2 border-brand-cream-dark">
-            <td colSpan={6} className="p-0 bg-brand-cream/20">
-              <FamilySizeSummary
-                skus={rg.families.flatMap((f) => f.skus)}
-                label={`${rg.run} size summary · all ${rg.skuCount} colorways across ${rg.families.length} styles`}
-              />
-              <OnOrderSummary
-                skus={rg.families.flatMap((f) => f.skus)}
-                label={`${rg.run} on order`}
-              />
-            </td>
-          </tr>
+          {/* Run-level summary box */}
+          <div className="rounded-lg border-2 border-brand-green/30 bg-white overflow-hidden">
+            <FamilySizeSummary
+              skus={rg.families.flatMap((f) => f.skus)}
+              label={`${rg.run} size summary · all ${rg.skuCount} colorways across ${rg.families.length} styles`}
+            />
+            <OnOrderSummary
+              skus={rg.families.flatMap((f) => f.skus)}
+              label={`${rg.run} on order`}
+            />
+          </div>
+
+          {/* One box per style */}
           {rg.families.map((fg) => {
             const fkey = `${rg.run}::${fg.family}`;
-            const famOpen = expandedFamilies.has(fkey);
             return (
-              <FamilyRow
+              <StyleSection
                 key={fkey}
                 fkey={fkey}
                 fg={fg}
-                famOpen={famOpen}
+                famOpen={expandedFamilies.has(fkey)}
                 expandedSkus={expandedSkus}
                 onToggleFamily={onToggleFamily}
                 onToggleSku={onToggleSku}
@@ -877,11 +879,11 @@ function RunRow({
           })}
         </>
       )}
-    </>
+    </section>
   );
 }
 
-function FamilyRow({
+function StyleSection({
   fkey,
   fg,
   famOpen,
@@ -897,37 +899,34 @@ function FamilyRow({
   onToggleSku: (k: string) => void;
 }) {
   return (
-    <>
-      <tr
+    <div className="rounded-lg border-2 border-brand-cream-dark bg-white overflow-hidden">
+      {/* Style header */}
+      <div
         onClick={() => onToggleFamily(fkey)}
-        className={`cursor-pointer select-none border-t-2 border-brand-cream-dark transition-colors ${
+        className={`${GRID} px-3 py-2.5 cursor-pointer select-none transition-colors ${
           famOpen
             ? "bg-brand-cream/60 hover:bg-brand-cream/70"
-            : "bg-brand-cream/25 hover:bg-brand-cream/50"
+            : "hover:bg-brand-cream/30"
         }`}
       >
-        <td className="py-2.5 pl-8 pr-3 text-brand-green/50">
+        <div className="text-brand-green/50">
           <ChevronRight
             className={`w-4 h-4 transition-transform ${famOpen ? "rotate-90" : ""}`}
           />
-        </td>
-        <td className="px-3 py-2.5 font-heading font-semibold text-brand-text">
+        </div>
+        <div className="font-heading font-semibold text-brand-text">
           {fg.family}{" "}
           <span className="font-body font-normal text-brand-text/40 text-xs">
             · {fg.skus.length} colorway{fg.skus.length === 1 ? "" : "s"}
           </span>
-        </td>
-        <Metrics onHand={fg.onHand} onOrder={fg.onOrder} sold={fg.sold} />
-      </tr>
+        </div>
+        <MetricCells onHand={fg.onHand} onOrder={fg.onOrder} sold={fg.sold} />
+      </div>
 
       {famOpen && (
-        <>
-          <tr className="border-b border-brand-cream">
-            <td colSpan={6} className="p-0">
-              <FamilySizeSummary skus={fg.skus} />
-              <OnOrderSummary skus={fg.skus} label={`${fg.family} on order`} />
-            </td>
-          </tr>
+        <div className="border-t border-brand-cream-dark">
+          <FamilySizeSummary skus={fg.skus} />
+          <OnOrderSummary skus={fg.skus} label={`${fg.family} on order`} />
           {fg.skus.map((sku) => (
             <SkuRow
               key={sku.sku}
@@ -936,9 +935,9 @@ function FamilyRow({
               onToggleSku={onToggleSku}
             />
           ))}
-        </>
+        </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -953,27 +952,25 @@ function SkuRow({
 }) {
   return (
     <>
-      <tr
+      <div
         onClick={() => onToggleSku(sku.sku)}
-        className="cursor-pointer select-none hover:bg-brand-cream/30 border-b border-brand-cream transition-colors"
+        className={`${GRID} px-3 py-1.5 cursor-pointer select-none hover:bg-brand-cream/30 border-t border-brand-cream transition-colors`}
       >
-        <td className="py-1.5 pl-14 pr-3 text-brand-text/30">
+        <div className="pl-5 text-brand-text/30">
           <ChevronRight
             className={`w-3 h-3 transition-transform ${skuOpen ? "rotate-90" : ""}`}
           />
-        </td>
-        <td className="px-3 py-1.5 text-brand-text/80">
+        </div>
+        <div className="text-brand-text/80">
           {sku.color || sku.description || sku.sku}{" "}
           <span className="text-brand-text/30 text-xs">{sku.gender}</span>
-        </td>
-        <Metrics onHand={sku.onHand} onOrder={sku.onOrder} sold={sku.sold} />
-      </tr>
+        </div>
+        <MetricCells onHand={sku.onHand} onOrder={sku.onOrder} sold={sku.sold} />
+      </div>
       {skuOpen && (
-        <tr className="border-b border-brand-cream">
-          <td colSpan={6} className="p-0">
-            <SizeGrid sku={sku} />
-          </td>
-        </tr>
+        <div className="border-t border-brand-cream">
+          <SizeGrid sku={sku} />
+        </div>
       )}
     </>
   );
