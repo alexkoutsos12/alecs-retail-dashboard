@@ -139,7 +139,12 @@ export const appModules: AppModule[] = [
         href: "/nike-planner/order-builder",
         icon: "ClipboardList",
       },
-      { label: "Import", href: "/nike-planner/import", icon: "Upload" },
+      { label: "Import Stock", href: "/nike-planner/import", icon: "Upload" },
+      {
+        label: "Import On-Order",
+        href: "/nike-planner/import-on-order",
+        icon: "Upload",
+      },
     ],
     importRoute: "/nike-planner/import",
     reportRoutes: [

@@ -51,7 +51,7 @@ export interface NikeSku {
 
 // ─── Size-run resolution ─────────────────────────────────────────────────────
 
-function resolveRun(summary: string, codes: number[]): SizeRun {
+export function resolveRun(summary: string, codes: number[]): SizeRun {
   const s = ` ${summary.toUpperCase()} `;
   if (/\bTD\b|\(TD\)/.test(s)) return "Toddler";
   if (/\bPS\b|\(PS\)/.test(s)) return "Little Kid";
@@ -68,7 +68,7 @@ function resolveRun(summary: string, codes: number[]): SizeRun {
   return "Other";
 }
 
-function resolveGender(className: string): Gender {
+export function resolveGender(className: string): Gender {
   const c = className.toLowerCase();
   if (c.includes("boys") || c.includes("boy")) return "Boys";
   if (c.includes("girls") || c.includes("girl")) return "Girls";
@@ -142,7 +142,7 @@ function normalizeDescription(summary: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
-function resolveFamily(summary: string, className: string): string {
+export function resolveFamily(summary: string, className: string): string {
   const norm = normalizeDescription(summary);
   if (norm === "") {
     // No description — fall back to the class (strip the leading code).
@@ -162,12 +162,12 @@ function resolveFamily(summary: string, className: string): string {
 
 // ─── Size code helpers ───────────────────────────────────────────────────────
 
-function sizeLabel(code: number): string {
+export function sizeLabel(code: number): string {
   const size = code / 10;
   return Number.isInteger(size) ? String(size) : size.toFixed(1);
 }
 
-function sizeOrder(code: number, run: SizeRun): number {
+export function sizeOrder(code: number, run: SizeRun): number {
   // Little Kid runs go 10.5c-13.5c (105-135) THEN 1y-3y (010-030), so push the
   // low youth codes after the high toddler codes.
   if (run === "Little Kid" && code <= 30) return code + 1000;

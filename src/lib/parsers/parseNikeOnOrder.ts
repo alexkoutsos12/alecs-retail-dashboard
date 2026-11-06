@@ -1,0 +1,181 @@
+import * as XLSX from "xlsx";
+import {
+  SizeRun,
+  Gender,
+  resolveRun,
+  resolveGender,
+  resolveFamily,
+  sizeLabel,
+  sizeOrder,
+} from "./parseNikeStock";
+
+/**
+ * Nike on-order (Purchase Order) CSV parser.
+ *
+ * RICS exports one row per (PO, SKU, size). This collapses to one record per
+ * SKU with its purchase orders broken out — each PO carries its name, ship
+ * date, and open (still-to-receive) quantity by size — plus an aggregated
+ * on-order size curve. Keyed by SKU so the Planner can merge it onto the
+ * matching stock item (or surface it as an on-order-only style).
+ */
+
+export interface OnOrderPO {
+  poNumber: string;
+  shipDate: string; // display, e.g. "3/1/2027"
+  shipSort: string; // sortable, e.g. "2027-03-01"
+  orderDate: string;
+  sizes: { code: number; label: string; order: number; open: number }[];
+  total: number;
+}
+
+export interface OnOrderSizeCell {
+  code: number;
+  label: string;
+  order: number;
+  onOrder: number;
+}
+
+export interface OnOrderSku {
+  sku: string;
+  description: string;
+  color: string;
+  classCode: string;
+  className: string;
+  gender: Gender;
+  run: SizeRun;
+  styleFamily: string;
+  retailPrice: number;
+  cost: number;
+  onOrder: number; // total open across all POs
+  pos: OnOrderPO[];
+  sizes: OnOrderSizeCell[]; // aggregated open by size
+}
+
+function num(v: unknown): number {
+  if (typeof v === "number") return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v.replace(/[^0-9.\-]/g, ""));
+    return Number.isNaN(n) ? 0 : n;
+  }
+  return 0;
+}
+function str(v: unknown): string {
+  return v == null ? "" : String(v).trim();
+}
+
+/** "3/1/2027" -> "2027-03-01" for sorting; passthrough otherwise. */
+function shipSortKey(d: string): string {
+  const m = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return d;
+  return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+}
+
+interface Accum {
+  first: Record<string, unknown>;
+  pos: Map<string, { shipDate: string; orderDate: string; sizes: Map<number, number> }>;
+  sizes: Map<number, number>;
+}
+
+export async function parseNikeOnOrder(
+  buffer: ArrayBuffer
+): Promise<OnOrderSku[]> {
+  const wb = XLSX.read(buffer, { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+    defval: null,
+  });
+  const keyOf = (row: Record<string, unknown>, name: string): unknown => {
+    for (const k of Object.keys(row))
+      if (k.replace(/^﻿/, "").trim() === name) return row[k];
+    return null;
+  };
+
+  const bySku = new Map<string, Accum>();
+  for (const row of rows) {
+    const sku = str(keyOf(row, "SKU"));
+    if (!sku) continue;
+    const code = Math.round(num(keyOf(row, "COL")));
+    if (code <= 0) continue;
+    const openRaw = keyOf(row, "OpenQty");
+    const open =
+      openRaw != null && String(openRaw).trim() !== ""
+        ? num(openRaw)
+        : num(keyOf(row, "OrderedQty"));
+    if (open <= 0) continue;
+
+    let acc = bySku.get(sku);
+    if (!acc) {
+      acc = { first: row, pos: new Map(), sizes: new Map() };
+      bySku.set(sku, acc);
+    }
+    const poName = str(keyOf(row, "PONumber")) || "(no PO)";
+    let po = acc.pos.get(poName);
+    if (!po) {
+      po = {
+        shipDate: str(keyOf(row, "ShipDate")),
+        orderDate: str(keyOf(row, "OrderDate")),
+        sizes: new Map(),
+      };
+      acc.pos.set(poName, po);
+    }
+    po.sizes.set(code, (po.sizes.get(code) ?? 0) + open);
+    acc.sizes.set(code, (acc.sizes.get(code) ?? 0) + open);
+  }
+
+  const out: OnOrderSku[] = [];
+  for (const [sku, acc] of bySku) {
+    const row = acc.first;
+    const description = str(keyOf(row, "Description"));
+    const className = str(keyOf(row, "Class3"));
+    const codes = [...acc.sizes.keys()];
+    const run = resolveRun(description, codes);
+
+    const pos: OnOrderPO[] = [...acc.pos.entries()]
+      .map(([poNumber, p]) => {
+        const sizes = [...p.sizes.entries()]
+          .map(([code, open]) => ({
+            code,
+            label: sizeLabel(code),
+            order: sizeOrder(code, run),
+            open,
+          }))
+          .sort((a, b) => a.order - b.order);
+        return {
+          poNumber,
+          shipDate: p.shipDate,
+          shipSort: shipSortKey(p.shipDate),
+          orderDate: p.orderDate,
+          sizes,
+          total: sizes.reduce((s, c) => s + c.open, 0),
+        };
+      })
+      .sort((a, b) => a.shipSort.localeCompare(b.shipSort));
+
+    const sizes: OnOrderSizeCell[] = codes
+      .map((code) => ({
+        code,
+        label: sizeLabel(code),
+        order: sizeOrder(code, run),
+        onOrder: acc.sizes.get(code)!,
+      }))
+      .sort((a, b) => a.order - b.order);
+
+    out.push({
+      sku,
+      description,
+      color: str(keyOf(row, "Color")),
+      classCode: (className.match(/^\d+/) ?? [""])[0],
+      className: className.replace(/^\d+\s*-\s*/, "").trim(),
+      gender: resolveGender(className),
+      run,
+      styleFamily: resolveFamily(description, className),
+      retailPrice: num(keyOf(row, "SkuRetail")),
+      cost: num(keyOf(row, "SkuCost")),
+      onOrder: sizes.reduce((s, c) => s + c.onOrder, 0),
+      pos,
+      sizes,
+    });
+  }
+
+  return out;
+}

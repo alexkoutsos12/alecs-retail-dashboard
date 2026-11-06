@@ -94,11 +94,14 @@ export default function NikePlannerImportPage() {
         collection(db, "reports"),
         where("module", "==", MODULE),
         orderBy("uploadedAt", "desc"),
-        limit(10)
+        limit(40)
       );
       const snap = await getDocs(q);
       setRecentImports(
-        snap.docs.map((d) => ({ id: d.id, ...d.data() } as ReportDoc))
+        snap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as ReportDoc & { kind?: string }))
+          .filter((r) => (r as { kind?: string }).kind !== "on-order")
+          .slice(0, 10)
       );
     } catch (err) {
       console.error("fetchRecentImports error:", err);
@@ -182,6 +185,7 @@ export default function NikePlannerImportPage() {
 
       await setDoc(docRef, {
         module: MODULE,
+        kind: "stock",
         filename: selectedFile.name,
         salesWindow: salesWindow.trim() || DEFAULT_WINDOW,
         totalSkus: skus.length,

@@ -152,9 +152,12 @@ export default function OrderBuilderPage() {
             orderBy("uploadedAt", "desc")
           )
         );
-        const list = snap.docs.map(
-          (d) => ({ id: d.id, ...d.data() } as ReportMeta)
-        );
+        const list = snap.docs
+          .map(
+            (d) =>
+              ({ id: d.id, ...d.data() } as ReportMeta & { kind?: string })
+          )
+          .filter((r) => (r as { kind?: string }).kind !== "on-order");
         setReports(list);
         if (list.length > 0) setSelectedId(list[0].id);
       } catch (err) {

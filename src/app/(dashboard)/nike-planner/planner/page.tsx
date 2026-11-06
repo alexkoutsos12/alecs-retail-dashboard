@@ -17,8 +17,64 @@ import {
   SizeRun,
   Gender,
 } from "@/lib/parsers/parseNikeStock";
+import { OnOrderSku, OnOrderPO } from "@/lib/parsers/parseNikeOnOrder";
 
 const MODULE = "nike-planner";
+
+// A stock SKU with its purchase-order breakdown merged in (by SKU).
+type PlannerSku = NikeSku & { pos?: OnOrderPO[] };
+
+function onOrderToSku(oo: OnOrderSku): PlannerSku {
+  return {
+    sku: oo.sku,
+    supplierSku: "",
+    description: oo.description,
+    styleFamily: oo.styleFamily,
+    color: oo.color,
+    classCode: oo.classCode,
+    className: oo.className,
+    gender: oo.gender,
+    run: oo.run,
+    retailPrice: oo.retailPrice,
+    cost: oo.cost,
+    marginPct:
+      oo.retailPrice > 0 ? (oo.retailPrice - oo.cost) / oo.retailPrice : 0,
+    daysFirstReceived: 0,
+    daysLastReceived: 0,
+    sizes: oo.sizes.map((s) => ({
+      code: s.code,
+      label: s.label,
+      order: s.order,
+      onHand: 0,
+      onOrder: s.onOrder,
+      sold: 0,
+    })),
+    onHand: 0,
+    onOrder: oo.onOrder,
+    sold: 0,
+    sellThrough: 0,
+    coverageGap: 0,
+    pos: oo.pos,
+  };
+}
+
+function mergeOnOrder(
+  stock: NikeSku[],
+  onOrder: OnOrderSku[]
+): PlannerSku[] {
+  const ooMap = new Map(onOrder.map((o) => [o.sku, o]));
+  const out: PlannerSku[] = [];
+  const seen = new Set<string>();
+  for (const s of stock) {
+    seen.add(s.sku);
+    const oo = ooMap.get(s.sku);
+    out.push(oo ? { ...s, pos: oo.pos } : s);
+  }
+  for (const oo of onOrder) {
+    if (!seen.has(oo.sku)) out.push(onOrderToSku(oo));
+  }
+  return out;
+}
 const RUN_ORDER: SizeRun[] = ["Toddler", "Little Kid", "Big Kid", "Other"];
 
 type View = "run" | "reorder";
@@ -58,7 +114,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
 
 interface FamilyGroup {
   family: string;
-  skus: NikeSku[];
+  skus: PlannerSku[];
   onHand: number;
   onOrder: number;
   sold: number;
@@ -151,14 +207,23 @@ export default function NikePlannerPage() {
   const [selectedId, setSelectedId] = useState<string>("");
   const [salesWindow, setSalesWindow] = useState("");
 
-  const [skus, setSkus] = useState<NikeSku[]>([]);
+  const [stockSkus, setStockSkus] = useState<NikeSku[]>([]);
+  const [onOrderSkus, setOnOrderSkus] = useState<OnOrderSku[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const cacheRef = useRef<Map<string, NikeSku[]>>(new Map());
 
+  const skus = useMemo<PlannerSku[]>(
+    () => mergeOnOrder(stockSkus, onOrderSkus),
+    [stockSkus, onOrderSkus]
+  );
+
   const [view, setView] = useState<View>("run");
   const [runFilter, setRunFilter] = useState<SizeRun | "All">("All");
   const [genderFilter, setGenderFilter] = useState<Gender | "All">("All");
+  const [onOrderFilter, setOnOrderFilter] = useState<"all" | "on" | "off">(
+    "all"
+  );
   const [search, setSearch] = useState("");
 
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
@@ -191,7 +256,7 @@ export default function NikePlannerPage() {
           data = (await res.json()) as NikeSku[];
           cacheRef.current.set(report.id, data);
         }
-        setSkus(data);
+        setStockSkus(data);
       } catch (err) {
         setDataError(
           err instanceof Error ? err.message : "Failed to load report data."
@@ -213,13 +278,32 @@ export default function NikePlannerPage() {
             orderBy("uploadedAt", "desc")
           )
         );
-        const list = snap.docs.map(
-          (d) => ({ id: d.id, ...d.data() } as ReportMeta)
+        const all = snap.docs.map(
+          (d) =>
+            ({ id: d.id, ...d.data() } as ReportMeta & {
+              kind?: string;
+              storagePath: string;
+            })
         );
-        setReports(list);
-        if (list.length > 0) {
-          setSelectedId(list[0].id);
-          loadData(list[0]);
+        const stock = all.filter((r) => r.kind !== "on-order");
+        const onOrder = all.filter((r) => r.kind === "on-order");
+        setReports(stock);
+        if (stock.length > 0) {
+          setSelectedId(stock[0].id);
+          loadData(stock[0]);
+        }
+        if (onOrder.length > 0) {
+          try {
+            const url = await getDownloadURL(
+              storageRef(storage, onOrder[0].storagePath)
+            );
+            const res = await fetch(
+              `/api/storage-proxy?url=${encodeURIComponent(url)}`
+            );
+            if (res.ok) setOnOrderSkus((await res.json()) as OnOrderSku[]);
+          } catch (err) {
+            console.error("on-order load error:", err);
+          }
         }
       } catch (err) {
         console.error("fetchReports error:", err);
@@ -243,6 +327,9 @@ export default function NikePlannerPage() {
     return skus.filter((k) => {
       if (runFilter !== "All" && k.run !== runFilter) return false;
       if (genderFilter !== "All" && k.gender !== genderFilter) return false;
+      const hasOnOrder = (k.pos && k.pos.length > 0) || k.onOrder > 0;
+      if (onOrderFilter === "on" && !hasOnOrder) return false;
+      if (onOrderFilter === "off" && hasOnOrder) return false;
       if (
         q &&
         !k.styleFamily.toLowerCase().includes(q) &&
@@ -253,10 +340,10 @@ export default function NikePlannerPage() {
         return false;
       return true;
     });
-  }, [skus, runFilter, genderFilter, search]);
+  }, [skus, runFilter, genderFilter, onOrderFilter, search]);
 
   const runGroups = useMemo<RunGroup[]>(() => {
-    const byRun = new Map<string, NikeSku[]>();
+    const byRun = new Map<string, PlannerSku[]>();
     for (const k of filtered) {
       if (!byRun.has(k.run)) byRun.set(k.run, []);
       byRun.get(k.run)!.push(k);
@@ -265,7 +352,7 @@ export default function NikePlannerPage() {
     for (const run of RUN_ORDER) {
       const list = byRun.get(run);
       if (!list || list.length === 0) continue;
-      const famMap = new Map<string, NikeSku[]>();
+      const famMap = new Map<string, PlannerSku[]>();
       for (const k of list) {
         if (!famMap.has(k.styleFamily)) famMap.set(k.styleFamily, []);
         famMap.get(k.styleFamily)!.push(k);
@@ -544,6 +631,29 @@ export default function NikePlannerPage() {
                     </button>
                   ))}
                 </div>
+                <div className="flex gap-1 border-l border-brand-cream-dark pl-2 ml-1">
+                  {(
+                    [
+                      ["all", "All stock"],
+                      ["on", "On order"],
+                      ["off", "Not on order"],
+                    ] as const
+                  ).map(([val, lbl]) => (
+                    <button
+                      key={val}
+                      onClick={() => setOnOrderFilter(val)}
+                      className={`font-body text-xs px-2.5 py-1 rounded transition-colors ${
+                        onOrderFilter === val
+                          ? val === "on"
+                            ? "bg-indigo-600 text-white"
+                            : "bg-brand-green text-brand-cream"
+                          : "bg-brand-cream text-brand-text/70 hover:bg-brand-cream-dark"
+                      }`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
                 <label className="flex items-center gap-1.5 ml-auto border border-brand-cream-dark rounded px-2 py-1">
                   <Search className="w-3.5 h-3.5 text-brand-text/40" />
                   <input
@@ -716,6 +826,10 @@ function RunRow({
                 skus={rg.families.flatMap((f) => f.skus)}
                 label={`${rg.run} size summary · all ${rg.skuCount} colorways across ${rg.families.length} styles`}
               />
+              <OnOrderSummary
+                skus={rg.families.flatMap((f) => f.skus)}
+                label={`${rg.run} on order`}
+              />
             </td>
           </tr>
           {rg.families.map((fg) => {
@@ -784,6 +898,7 @@ function FamilyRow({
           <tr className="border-b border-brand-cream">
             <td colSpan={6} className="p-0">
               <FamilySizeSummary skus={fg.skus} />
+              <OnOrderSummary skus={fg.skus} label={`${fg.family} on order`} />
             </td>
           </tr>
           {fg.skus.map((sku) => (
@@ -805,7 +920,7 @@ function SkuRow({
   skuOpen,
   onToggleSku,
 }: {
-  sku: NikeSku;
+  sku: PlannerSku;
   skuOpen: boolean;
   onToggleSku: (k: string) => void;
 }) {
@@ -849,7 +964,7 @@ function ReorderView({
   expandedSkus,
   onToggleSku,
 }: {
-  list: NikeSku[];
+  list: PlannerSku[];
   expandedSkus: Set<string>;
   onToggleSku: (k: string) => void;
 }) {
@@ -898,7 +1013,7 @@ function ReorderRow({
   open,
   onToggleSku,
 }: {
-  sku: NikeSku;
+  sku: PlannerSku;
   open: boolean;
   onToggleSku: (k: string) => void;
 }) {
@@ -1095,9 +1210,143 @@ function FamilySizeSummary({
   );
 }
 
+// ─── On-order summary (distinct grid analysis for incoming stock) ────────────
+
+interface PoCurveRow {
+  poNumber: string;
+  shipDate: string;
+  shipSort: string;
+  bySize: Map<number, number>;
+  total: number;
+}
+
+/** Aggregate every purchase order feeding the given SKUs, grouped by PO. */
+function onOrderSummary(skus: PlannerSku[]): {
+  columns: { code: number; label: string; order: number }[];
+  rows: PoCurveRow[];
+  totalBySize: Map<number, number>;
+  grandTotal: number;
+} {
+  const colMap = new Map<number, { code: number; label: string; order: number }>();
+  const poMap = new Map<string, PoCurveRow>();
+  for (const k of skus) {
+    for (const po of k.pos ?? []) {
+      let row = poMap.get(po.poNumber);
+      if (!row) {
+        row = {
+          poNumber: po.poNumber,
+          shipDate: po.shipDate,
+          shipSort: po.shipSort,
+          bySize: new Map(),
+          total: 0,
+        };
+        poMap.set(po.poNumber, row);
+      }
+      for (const s of po.sizes) {
+        if (s.open <= 0) continue;
+        if (!colMap.has(s.code))
+          colMap.set(s.code, { code: s.code, label: s.label, order: s.order });
+        row.bySize.set(s.code, (row.bySize.get(s.code) || 0) + s.open);
+        row.total += s.open;
+      }
+    }
+  }
+  const columns = [...colMap.values()].sort((a, b) => a.order - b.order);
+  const rows = [...poMap.values()].sort(
+    (a, b) => a.shipSort.localeCompare(b.shipSort) || a.poNumber.localeCompare(b.poNumber)
+  );
+  const totalBySize = new Map<number, number>();
+  let grandTotal = 0;
+  for (const r of rows) {
+    for (const [code, q] of r.bySize) {
+      totalBySize.set(code, (totalBySize.get(code) || 0) + q);
+      grandTotal += q;
+    }
+  }
+  return { columns, rows, totalBySize, grandTotal };
+}
+
+function OnOrderSummary({ skus, label }: { skus: PlannerSku[]; label?: string }) {
+  const { columns, rows, totalBySize, grandTotal } = onOrderSummary(skus);
+  if (rows.length === 0) return null;
+  return (
+    <div className="bg-indigo-50/60 px-4 py-3 border-y-2 border-indigo-200">
+      <p className="font-body text-[11px] uppercase tracking-wider text-indigo-500 mb-2 flex items-center gap-2">
+        <span className="inline-block w-2 h-2 rounded-full bg-indigo-500" />
+        {label ?? "On order"} · {rows.length} purchase order
+        {rows.length === 1 ? "" : "s"} · {grandTotal} pairs incoming
+      </p>
+      <div className="overflow-x-auto">
+        <table className="text-xs font-body">
+          <thead>
+            <tr className="text-indigo-400">
+              <th className="pr-3 py-1 text-left font-normal">PO · ship date</th>
+              {columns.map((c) => (
+                <th
+                  key={c.code}
+                  className="px-1.5 py-1 text-center font-semibold text-indigo-600 min-w-[34px]"
+                >
+                  {c.label}
+                </th>
+              ))}
+              <th className="pl-3 py-1 text-center font-semibold text-indigo-500">
+                Tot
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.poNumber} className="border-t border-indigo-100">
+                <td className="pr-3 py-0.5 text-left whitespace-nowrap text-indigo-700">
+                  <span className="font-semibold">PO {r.poNumber}</span>
+                  {r.shipDate && (
+                    <span className="text-indigo-400"> · {r.shipDate}</span>
+                  )}
+                </td>
+                {columns.map((c) => {
+                  const q = r.bySize.get(c.code) || 0;
+                  return (
+                    <td
+                      key={c.code}
+                      className={`px-1.5 py-1 text-center tabular-nums ${
+                        q > 0
+                          ? "bg-indigo-100 text-indigo-800 font-medium"
+                          : "text-indigo-200"
+                      }`}
+                    >
+                      {q || ""}
+                    </td>
+                  );
+                })}
+                <td className="pl-3 py-1 text-center tabular-nums font-semibold text-indigo-700">
+                  {r.total}
+                </td>
+              </tr>
+            ))}
+            <tr className="border-t-2 border-indigo-200 font-semibold text-indigo-800">
+              <td className="pr-3 py-1 text-left">All POs</td>
+              {columns.map((c) => (
+                <td key={c.code} className="px-1.5 py-1 text-center tabular-nums">
+                  {totalBySize.get(c.code) || ""}
+                </td>
+              ))}
+              <td className="pl-3 py-1 text-center tabular-nums">{grandTotal}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] text-indigo-400 mt-2">
+        Each row is one purchase order — pairs coming in by size, with its ship
+        date. Darker cell = pairs on that order.
+      </p>
+    </div>
+  );
+}
+
 // ─── Size grid (shared drill-down) ───────────────────────────────────────────
 
-function SizeGrid({ sku }: { sku: NikeSku }) {
+function SizeGrid({ sku }: { sku: PlannerSku }) {
+  const pos = sku.pos ?? [];
   return (
     <div className="bg-brand-cream/30 px-4 py-3">
       <div className="flex flex-wrap gap-4 text-xs font-body text-brand-text/50 mb-2">
@@ -1148,17 +1397,6 @@ function SizeGrid({ sku }: { sku: NikeSku }) {
               ))}
             </tr>
             <tr>
-              <td className="pr-2 py-0.5 text-brand-text/40 text-right">On order</td>
-              {sku.sizes.map((s) => (
-                <td
-                  key={s.code}
-                  className="px-2 py-0.5 text-center tabular-nums text-brand-text/50"
-                >
-                  {s.onOrder || ""}
-                </td>
-              ))}
-            </tr>
-            <tr>
               <td className="pr-2 py-0.5 text-brand-text/40 text-right">Sold</td>
               {sku.sizes.map((s) => (
                 <td
@@ -1173,12 +1411,72 @@ function SizeGrid({ sku }: { sku: NikeSku }) {
                 </td>
               ))}
             </tr>
+            {pos.length > 0 ? (
+              pos.map((po, i) => {
+                const open = new Map(
+                  po.sizes.map((s) => [s.code, s.open] as [number, number])
+                );
+                return (
+                  <tr
+                    key={`${po.poNumber}-${i}`}
+                    className="bg-indigo-50/70 border-t border-indigo-100"
+                  >
+                    <td className="pr-2 py-0.5 text-right text-indigo-700 whitespace-nowrap">
+                      <span className="font-semibold">PO {po.poNumber}</span>
+                      {po.shipDate && (
+                        <span className="text-indigo-400">
+                          {" "}
+                          · {po.shipDate}
+                        </span>
+                      )}
+                    </td>
+                    {sku.sizes.map((s) => {
+                      const q = open.get(s.code) || 0;
+                      return (
+                        <td
+                          key={s.code}
+                          className={`px-2 py-0.5 text-center tabular-nums ${
+                            q > 0
+                              ? "bg-indigo-100 text-indigo-800 font-medium rounded"
+                              : "text-indigo-300"
+                          }`}
+                        >
+                          {q || ""}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td className="pr-2 py-0.5 text-brand-text/40 text-right">
+                  On order
+                </td>
+                {sku.sizes.map((s) => (
+                  <td
+                    key={s.code}
+                    className="px-2 py-0.5 text-center tabular-nums text-brand-text/50"
+                  >
+                    {s.onOrder || ""}
+                  </td>
+                ))}
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
       <p className="text-[11px] text-brand-text/40 mt-2">
         Amber = sold with none on hand (size gap). Green sold = selling faster
         than stocked.
+        {pos.length > 0 && (
+          <>
+            {" "}
+            <span className="text-indigo-500">
+              Indigo rows = pairs on order by purchase order, with ship date.
+            </span>
+          </>
+        )}
       </p>
     </div>
   );
