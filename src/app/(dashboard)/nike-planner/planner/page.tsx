@@ -507,7 +507,7 @@ export default function NikePlannerPage() {
         {salesWindow && (
           <>
             {" "}
-            Sales shown for <strong>{salesWindow}</strong>.
+            · <strong>{salesWindow}</strong>.
           </>
         )}
       </p>
@@ -1316,7 +1316,7 @@ function SummaryBlock({
                     className="bg-indigo-50/70 border-t border-indigo-100"
                   >
                     <td className="pr-3 py-0.5 text-right whitespace-nowrap text-indigo-700">
-                      <span className="font-semibold">PO {r.poNumber}</span>
+                      <span className="font-semibold">{r.poNumber}</span>
                       {r.shipDate && (
                         <span className="text-indigo-400">
                           {" "}
@@ -1475,7 +1475,7 @@ function SizeGrid({ sku }: { sku: PlannerSku }) {
                     className="bg-indigo-50/70 border-t border-indigo-100"
                   >
                     <td className="pr-2 py-0.5 text-right text-indigo-700 whitespace-nowrap">
-                      <span className="font-semibold">PO {po.poNumber}</span>
+                      <span className="font-semibold">{po.poNumber}</span>
                       {po.shipDate && (
                         <span className="text-indigo-400">
                           {" "}

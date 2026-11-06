@@ -34,7 +34,6 @@ import {
 import { parseNikeStock, NikeSku } from "@/lib/parsers/parseNikeStock";
 
 const MODULE = "nike-planner";
-const DEFAULT_WINDOW = "Spring/Summer (Jan–Jun 2026)";
 
 type ImportState = "idle" | "parsing" | "uploading" | "success" | "error";
 
@@ -42,6 +41,7 @@ interface ReportDoc {
   id: string;
   filename: string;
   salesWindow: string;
+  hasSales?: boolean;
   totalSkus: number;
   totalOnHand: number;
   totalOnOrder: number;
@@ -55,6 +55,7 @@ interface ReportDoc {
 interface SuccessData {
   filename: string;
   salesWindow: string;
+  hasSales: boolean;
   totalSkus: number;
   totalOnHand: number;
   totalOnOrder: number;
@@ -74,7 +75,6 @@ export default function NikePlannerImportPage() {
   const { user, userData } = useAuth();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [salesWindow, setSalesWindow] = useState(DEFAULT_WINDOW);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -177,6 +177,14 @@ export default function NikePlannerImportPage() {
       const totalOnOrder = skus.reduce((s, k) => s + k.onOrder, 0);
       const totalSold = skus.reduce((s, k) => s + k.sold, 0);
 
+      // The report drives this — sell-through history is present only when the
+      // export was run with a sales period (any units sold). RICS labels the
+      // column generically ("Sales1"), so the exact date range isn't in the CSV.
+      const hasSales = totalSold > 0;
+      const salesWindow = hasSales
+        ? "Includes sell-through history"
+        : "No sell-through history";
+
       const storagePath = `reports/${reportId}/nike-stock.json`;
       const jsonBlob = new Blob([JSON.stringify(skus)], {
         type: "application/json",
@@ -187,7 +195,8 @@ export default function NikePlannerImportPage() {
         module: MODULE,
         kind: "stock",
         filename: selectedFile.name,
-        salesWindow: salesWindow.trim() || DEFAULT_WINDOW,
+        salesWindow,
+        hasSales,
         totalSkus: skus.length,
         totalOnHand,
         totalOnOrder,
@@ -200,7 +209,8 @@ export default function NikePlannerImportPage() {
 
       setSuccessData({
         filename: selectedFile.name,
-        salesWindow: salesWindow.trim() || DEFAULT_WINDOW,
+        salesWindow,
+        hasSales,
         totalSkus: skus.length,
         totalOnHand,
         totalOnOrder,
@@ -345,17 +355,10 @@ export default function NikePlannerImportPage() {
             )}
           </div>
 
-          <label className="block mt-4">
-            <span className="font-body text-xs text-brand-text/50">
-              Sales period this export covers (the Sales column)
-            </span>
-            <input
-              type="text"
-              value={salesWindow}
-              onChange={(e) => setSalesWindow(e.target.value)}
-              className="mt-1 w-full max-w-sm border border-brand-cream-dark rounded px-2 py-1 text-sm bg-white text-brand-text focus:outline-none focus:border-brand-green"
-            />
-          </label>
+          <p className="mt-4 font-body text-xs text-brand-text/50">
+            Sell-through history is detected automatically from the report — if
+            you ran it with a sales period, it&apos;s included.
+          </p>
 
           <div className="mt-4 flex justify-end">
             <button
@@ -417,7 +420,14 @@ export default function NikePlannerImportPage() {
           </div>
           <div className="mb-5">
             <SummaryRow label="File" value={successData.filename} />
-            <SummaryRow label="Sales Period" value={successData.salesWindow} />
+            <SummaryRow
+              label="Sell-Through History"
+              value={
+                successData.hasSales
+                  ? `Included — ${successData.totalSold.toLocaleString()} units sold`
+                  : "Not included (no sales period)"
+              }
+            />
             <SummaryRow
               label="SKUs (colorways)"
               value={successData.totalSkus.toLocaleString()}
@@ -429,10 +439,6 @@ export default function NikePlannerImportPage() {
             <SummaryRow
               label="Units On Order"
               value={successData.totalOnOrder.toLocaleString()}
-            />
-            <SummaryRow
-              label="Units Sold (period)"
-              value={successData.totalSold.toLocaleString()}
             />
           </div>
           <div className="flex flex-wrap gap-3 items-center">
@@ -492,7 +498,7 @@ export default function NikePlannerImportPage() {
               <thead>
                 <tr className="border-b border-brand-cream-dark text-left text-brand-text/50">
                   <th className="px-4 py-2 font-normal">Filename</th>
-                  <th className="px-4 py-2 font-normal">Sales Period</th>
+                  <th className="px-4 py-2 font-normal">Sell-Through</th>
                   <th className="px-4 py-2 font-normal">SKUs</th>
                   <th className="px-4 py-2 font-normal">On Hand</th>
                   <th className="px-4 py-2 font-normal">Sold</th>
@@ -512,7 +518,7 @@ export default function NikePlannerImportPage() {
                         {row.filename}
                       </td>
                       <td className="px-4 py-2 whitespace-nowrap">
-                        {row.salesWindow}
+                        {row.hasSales ?? row.totalSold > 0 ? "Included" : "None"}
                       </td>
                       <td className="px-4 py-2">{row.totalSkus}</td>
                       <td className="px-4 py-2">{row.totalOnHand}</td>
