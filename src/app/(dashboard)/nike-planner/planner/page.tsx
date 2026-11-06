@@ -222,10 +222,16 @@ const MONTHS = [
  */
 function plainDate(v: string): string {
   if (!v) return "";
+  // Pure number: an Excel date serial, but only within a plausible date window
+  // (≈2009–2064) so a genuinely numeric id isn't misread as a date.
   if (/^\d+$/.test(v)) {
-    const d = new Date((parseInt(v, 10) - 25569) * 86400000);
-    if (!Number.isNaN(d.getTime()))
-      return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+    const n = parseInt(v, 10);
+    if (n >= 40000 && n <= 60000) {
+      const d = new Date((n - 25569) * 86400000);
+      if (!Number.isNaN(d.getTime()))
+        return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+    }
+    return v;
   }
   const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (m) return `${MONTHS[+m[1] - 1]} ${+m[2]}, ${m[3]}`;
@@ -1429,7 +1435,9 @@ function SummaryBlock({
                     className="bg-indigo-50/70 border-t border-indigo-100"
                   >
                     <td className="pr-3 py-0.5 text-right whitespace-nowrap text-indigo-700">
-                      <span className="font-semibold">{r.poNumber}</span>
+                      <span className="font-semibold">
+                        {plainDate(r.poNumber)}
+                      </span>
                       {r.shipDate && (
                         <span className="text-indigo-400">
                           {" "}
@@ -1588,7 +1596,9 @@ function SizeGrid({ sku }: { sku: PlannerSku }) {
                     className="bg-indigo-50/70 border-t border-indigo-100"
                   >
                     <td className="pr-2 py-0.5 text-right text-indigo-700 whitespace-nowrap">
-                      <span className="font-semibold">{po.poNumber}</span>
+                      <span className="font-semibold">
+                        {plainDate(po.poNumber)}
+                      </span>
                       {po.shipDate && (
                         <span className="text-indigo-400">
                           {" "}
