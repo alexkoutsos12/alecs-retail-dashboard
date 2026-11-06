@@ -15,7 +15,9 @@ import { ref as storageRef, getDownloadURL } from "firebase/storage";
 import {
   NikeSku,
   SizeRun,
+  SizeCell,
   Gender,
+  sizeOrder,
 } from "@/lib/parsers/parseNikeStock";
 import { OnOrderSku, OnOrderPO } from "@/lib/parsers/parseNikeOnOrder";
 
@@ -111,6 +113,86 @@ function mergeOnOrder(
   }
   return out;
 }
+
+// ─── Size-run classification ─────────────────────────────────────────────────
+// RICS size codes are size×10 with no C/Y marker, so sizes 4–7 (codes 40–70)
+// are ambiguous between Infant (4–10) and Big Kid (3.5–7). We resolve that per
+// SKU from its full size span, then route each size to the run it belongs to.
+// A shoe that spans runs (e.g. a 1Y–7Y shoe) contributes its sizes to each run
+// — so each run's size summary only ever shows its own sizes.
+//   Infant (Toddler): 4–10   (codes 40–100)
+//   Little Kid:       10.5–3 (codes 105–135, then 1–3 = 10–30)
+//   Big Kid:          3.5–7  (codes 35–70)
+
+function isInfantContext(sku: PlannerSku): boolean {
+  const u = ` ${sku.description.toUpperCase()} `;
+  if (/\bTD\b|\(TD\)/.test(u)) return true;
+  if (/\bGS\b|\bBG\b|\(GS\)|\bPS\b|\(PS\)/.test(u)) return false;
+  const codes = sku.sizes.map((s) => s.code);
+  // Any youth signal — 3.5, 1–3, or 10.5–13.5 — means 4–7 are Big Kid.
+  if (
+    codes.some(
+      (c) => c === 35 || (c >= 10 && c <= 30) || (c >= 105 && c <= 135)
+    )
+  )
+    return false;
+  // Otherwise, 8–10 present (the infant ceiling) makes 4–7 infant.
+  if (codes.some((c) => c >= 80 && c <= 100)) return true;
+  return false; // default to youth (Big Kid) when nothing distinguishes
+}
+
+function runForCode(code: number, infant: boolean): SizeRun | null {
+  if (code < 10 || code > 135) return null; // not a valid kids size (drops 14,15)
+  if (code >= 105) return "Little Kid"; // 10.5–13.5
+  if (code <= 30) return "Little Kid"; // 1–3 (youth tail)
+  if (code === 35) return "Big Kid"; // 3.5
+  if (code <= 70) return infant ? "Toddler" : "Big Kid"; // 4–7 overlap
+  return "Toddler"; // 7.5–10 (infant only)
+}
+
+/** Split a SKU into one slice per run it has sizes in (on-hand/sold/on-order
+ *  and purchase orders divided to match), so cross-range shoes land correctly. */
+function sliceByRun(sku: PlannerSku): PlannerSku[] {
+  const infant = isInfantContext(sku);
+  const buckets = new Map<SizeRun, SizeCell[]>();
+  for (const s of sku.sizes) {
+    const run = runForCode(s.code, infant);
+    if (!run) continue;
+    if (!buckets.has(run)) buckets.set(run, []);
+    buckets.get(run)!.push({ ...s, order: sizeOrder(s.code, run) });
+  }
+  const out: PlannerSku[] = [];
+  for (const [run, sizes] of buckets) {
+    sizes.sort((a, b) => a.order - b.order);
+    const codeSet = new Set(sizes.map((s) => s.code));
+    const onHand = sizes.reduce((a, s) => a + s.onHand, 0);
+    const onOrder = sizes.reduce((a, s) => a + s.onOrder, 0);
+    const sold = sizes.reduce((a, s) => a + s.sold, 0);
+    const pos = sku.pos
+      ?.map((po) => {
+        const psizes = po.sizes.filter((p) => codeSet.has(p.code));
+        return {
+          ...po,
+          sizes: psizes,
+          total: psizes.reduce((a, p) => a + p.open, 0),
+        };
+      })
+      .filter((po) => po.sizes.length > 0);
+    out.push({
+      ...sku,
+      run,
+      sizes,
+      onHand,
+      onOrder,
+      sold,
+      pos,
+      sellThrough: sold + onHand > 0 ? sold / (sold + onHand) : 0,
+      coverageGap: sold - (onHand + onOrder),
+    });
+  }
+  return out;
+}
+
 const RUN_ORDER: SizeRun[] = ["Toddler", "Little Kid", "Big Kid", "Other"];
 
 type View = "run" | "reorder";
@@ -363,15 +445,13 @@ export default function NikePlannerPage() {
 
   // ─── Derived ─────────────────────────────────────────────────────────────────
 
-  const filtered = useMemo(() => {
+  // SKU-level filters (gender, class, search). Run and on-order are applied
+  // per slice below, since one shoe can live in more than one run.
+  const filteredSkus = useMemo(() => {
     const q = search.trim().toLowerCase();
     return skus.filter((k) => {
-      if (runFilter !== "All" && k.run !== runFilter) return false;
       if (genderFilter !== "All" && k.gender !== genderFilter) return false;
       if (classFilter !== "All" && k.className !== classFilter) return false;
-      const hasOnOrder = (k.pos && k.pos.length > 0) || k.onOrder > 0;
-      if (onOrderFilter === "on" && !hasOnOrder) return false;
-      if (onOrderFilter === "off" && hasOnOrder) return false;
       if (
         q &&
         !k.styleFamily.toLowerCase().includes(q) &&
@@ -382,11 +462,32 @@ export default function NikePlannerPage() {
         return false;
       return true;
     });
-  }, [skus, runFilter, genderFilter, classFilter, onOrderFilter, search]);
+  }, [skus, genderFilter, classFilter, search]);
+
+  // Split each SKU into per-run slices, then apply the run and on-order filters.
+  const slices = useMemo<PlannerSku[]>(() => {
+    const out: PlannerSku[] = [];
+    for (const k of filteredSkus) {
+      for (const slice of sliceByRun(k)) {
+        if (runFilter !== "All" && slice.run !== runFilter) continue;
+        const hasOnOrder =
+          (slice.pos && slice.pos.length > 0) || slice.onOrder > 0;
+        if (onOrderFilter === "on" && !hasOnOrder) continue;
+        if (onOrderFilter === "off" && hasOnOrder) continue;
+        out.push(slice);
+      }
+    }
+    return out;
+  }, [filteredSkus, runFilter, onOrderFilter]);
+
+  const colorwayCount = useMemo(
+    () => new Set(slices.map((s) => s.sku)).size,
+    [slices]
+  );
 
   const runGroups = useMemo<RunGroup[]>(() => {
     const byRun = new Map<string, PlannerSku[]>();
-    for (const k of filtered) {
+    for (const k of slices) {
       if (!byRun.has(k.run)) byRun.set(k.run, []);
       byRun.get(k.run)!.push(k);
     }
@@ -417,10 +518,10 @@ export default function NikePlannerPage() {
       });
     }
     return groups;
-  }, [filtered]);
+  }, [slices]);
 
   const reorderList = useMemo(() => {
-    return filtered
+    return slices
       .filter((k) => k.sold > 0 && k.coverageGap > 0)
       .sort(
         (a, b) =>
@@ -428,16 +529,16 @@ export default function NikePlannerPage() {
           b.sold - a.sold ||
           sellThru(b.sold, b.onHand) - sellThru(a.sold, a.onHand)
       );
-  }, [filtered]);
+  }, [slices]);
 
-  const totals = useMemo(() => agg(filtered), [filtered]);
+  const totals = useMemo(() => agg(slices), [slices]);
 
   const reorderColorways = useMemo(
     () =>
-      filtered.filter(
+      slices.filter(
         (k) => getSignal(k.sold, k.onHand, k.onOrder) === "reorder"
       ),
-    [filtered]
+    [slices]
   );
   const shortUnits = reorderColorways.reduce((s, k) => s + k.coverageGap, 0);
 
@@ -477,7 +578,7 @@ export default function NikePlannerPage() {
     setExpandedSkus(
       new Set(
         runGroups.flatMap((r) =>
-          r.families.flatMap((f) => f.skus.map((s) => s.sku))
+          r.families.flatMap((f) => f.skus.map((s) => `${r.run}::${s.sku}`))
         )
       )
     );
@@ -564,7 +665,7 @@ export default function NikePlannerPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 <StatCard
                   label="Colorways (SKUs)"
-                  value={filtered.length.toLocaleString()}
+                  value={colorwayCount.toLocaleString()}
                 />
                 <StatCard
                   label="Units On Hand"
@@ -952,14 +1053,18 @@ function StyleSection({
       {famOpen && (
         <div className="border-t border-brand-cream-dark">
           <SummaryBlock skus={fg.skus} />
-          {fg.skus.map((sku) => (
-            <SkuRow
-              key={sku.sku}
-              sku={sku}
-              skuOpen={expandedSkus.has(sku.sku)}
-              onToggleSku={onToggleSku}
-            />
-          ))}
+          {fg.skus.map((sku) => {
+            const sk = `${sku.run}::${sku.sku}`;
+            return (
+              <SkuRow
+                key={sk}
+                skuKey={sk}
+                sku={sku}
+                skuOpen={expandedSkus.has(sk)}
+                onToggleSku={onToggleSku}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -968,17 +1073,19 @@ function StyleSection({
 
 function SkuRow({
   sku,
+  skuKey,
   skuOpen,
   onToggleSku,
 }: {
   sku: PlannerSku;
+  skuKey: string;
   skuOpen: boolean;
   onToggleSku: (k: string) => void;
 }) {
   return (
     <>
       <div
-        onClick={() => onToggleSku(sku.sku)}
+        onClick={() => onToggleSku(skuKey)}
         className={`${GRID} px-3 py-1.5 cursor-pointer select-none hover:bg-brand-cream/30 border-t border-brand-cream transition-colors`}
       >
         <div className="pl-5 text-brand-text/30">
@@ -1038,14 +1145,18 @@ function ReorderView({
           </tr>
         </thead>
         <tbody>
-          {list.map((sku) => (
-            <ReorderRow
-              key={sku.sku}
-              sku={sku}
-              open={expandedSkus.has(sku.sku)}
-              onToggleSku={onToggleSku}
-            />
-          ))}
+          {list.map((sku) => {
+            const sk = `${sku.run}::${sku.sku}`;
+            return (
+              <ReorderRow
+                key={sk}
+                skuKey={sk}
+                sku={sku}
+                open={expandedSkus.has(sk)}
+                onToggleSku={onToggleSku}
+              />
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -1054,10 +1165,12 @@ function ReorderView({
 
 function ReorderRow({
   sku,
+  skuKey,
   open,
   onToggleSku,
 }: {
   sku: PlannerSku;
+  skuKey: string;
   open: boolean;
   onToggleSku: (k: string) => void;
 }) {
@@ -1065,7 +1178,7 @@ function ReorderRow({
   return (
     <>
       <tr
-        onClick={() => onToggleSku(sku.sku)}
+        onClick={() => onToggleSku(skuKey)}
         className="cursor-pointer hover:bg-brand-cream/40 border-b border-brand-cream transition-colors"
       >
         <td className="px-3 py-2 text-brand-text/30">
