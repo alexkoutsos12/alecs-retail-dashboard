@@ -708,22 +708,33 @@ function RunRow({
         <Metrics onHand={rg.onHand} onOrder={rg.onOrder} sold={rg.sold} />
       </tr>
 
-      {runOpen &&
-        rg.families.map((fg) => {
-          const fkey = `${rg.run}::${fg.family}`;
-          const famOpen = expandedFamilies.has(fkey);
-          return (
-            <FamilyRow
-              key={fkey}
-              fkey={fkey}
-              fg={fg}
-              famOpen={famOpen}
-              expandedSkus={expandedSkus}
-              onToggleFamily={onToggleFamily}
-              onToggleSku={onToggleSku}
-            />
-          );
-        })}
+      {runOpen && (
+        <>
+          <tr className="border-b-2 border-brand-cream-dark">
+            <td colSpan={6} className="p-0 bg-brand-cream/20">
+              <FamilySizeSummary
+                skus={rg.families.flatMap((f) => f.skus)}
+                label={`${rg.run} size summary · all ${rg.skuCount} colorways across ${rg.families.length} styles`}
+              />
+            </td>
+          </tr>
+          {rg.families.map((fg) => {
+            const fkey = `${rg.run}::${fg.family}`;
+            const famOpen = expandedFamilies.has(fkey);
+            return (
+              <FamilyRow
+                key={fkey}
+                fkey={fkey}
+                fg={fg}
+                famOpen={famOpen}
+                expandedSkus={expandedSkus}
+                onToggleFamily={onToggleFamily}
+                onToggleSku={onToggleSku}
+              />
+            );
+          })}
+        </>
+      )}
     </>
   );
 }
@@ -988,7 +999,13 @@ function heat(n: number, scale: "stock" | "sold"): string {
   return arr[idx];
 }
 
-function FamilySizeSummary({ skus }: { skus: NikeSku[] }) {
+function FamilySizeSummary({
+  skus,
+  label,
+}: {
+  skus: NikeSku[];
+  label?: string;
+}) {
   const curve = familyCurve(skus);
   if (curve.length === 0) return null;
   const totOh = curve.reduce((s, c) => s + c.onHand, 0);
@@ -997,7 +1014,7 @@ function FamilySizeSummary({ skus }: { skus: NikeSku[] }) {
   return (
     <div className="bg-white px-4 py-3 border-y border-brand-cream-dark">
       <p className="font-body text-[11px] uppercase tracking-wider text-brand-text/40 mb-2">
-        Size summary · all {skus.length} colorways
+        {label ?? `Size summary · all ${skus.length} colorways`}
       </p>
       <div className="overflow-x-auto">
         <table className="text-xs font-body">
