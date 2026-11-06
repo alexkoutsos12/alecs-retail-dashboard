@@ -9,7 +9,7 @@ import {
   ChangeEvent,
 } from "react";
 import Link from "next/link";
-import { Upload, CheckCircle, AlertCircle, Trash2 } from "lucide-react";
+import { Upload, CheckCircle, AlertCircle, Trash2, FileText } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { canDeleteReport } from "@/lib/permissions";
 import { db, storage } from "@/lib/firebase";
@@ -188,6 +188,37 @@ export default function OnOrderImportPage() {
         Upload a RICS Purchase Order / on-order export (.csv). It merges into the
         Planner by SKU.
       </p>
+
+      {/* How to run the report */}
+      <div className="bg-brand-cream/40 border border-brand-cream-dark rounded p-5 mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <FileText className="w-4 h-4 text-brand-green shrink-0" />
+          <h2 className="font-heading text-brand-green text-sm font-bold">
+            How to run this report in RICS
+          </h2>
+        </div>
+        <ol className="list-decimal pl-5 space-y-1.5 font-body text-sm text-brand-text/80">
+          <li>
+            Open the <strong>Purchase Orders</strong> report.
+          </li>
+          <li>
+            Change the format to <strong>CSV</strong>.
+          </li>
+          <li>
+            Choose <strong>On Order at Once</strong> and{" "}
+            <strong>On Order Future</strong>.
+          </li>
+          <li>
+            Select <strong>NIKE</strong> as the supplier.
+          </li>
+          <li>
+            Under <strong>By Class</strong>, select all kids shoes.
+          </li>
+          <li>
+            Select <strong>Open POs only</strong>.
+          </li>
+        </ol>
+      </div>
 
       {deleteDialog && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
