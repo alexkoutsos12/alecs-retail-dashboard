@@ -193,6 +193,33 @@ function sliceByRun(sku: PlannerSku): PlannerSku[] {
   return out;
 }
 
+/** Drop hidden purchase orders from a SKU and recompute its on-order (totals
+ *  and per-size) from the remaining POs, so every downstream view matches. */
+function applyPoFilter(sku: PlannerSku, hidden: Set<string>): PlannerSku {
+  if (!sku.pos || sku.pos.length === 0 || hidden.size === 0) return sku;
+  const pos = sku.pos.filter((po) => !hidden.has(po.poNumber));
+  if (pos.length === sku.pos.length) return sku;
+  const byCode = new Map<number, number>();
+  for (const po of pos)
+    for (const s of po.sizes)
+      byCode.set(s.code, (byCode.get(s.code) || 0) + s.open);
+  const sizes = sku.sizes.map((s) => ({ ...s, onOrder: byCode.get(s.code) || 0 }));
+  const onOrder = [...byCode.values()].reduce((a, b) => a + b, 0);
+  return {
+    ...sku,
+    pos,
+    sizes,
+    onOrder,
+    coverageGap: sku.sold - (sku.onHand + onOrder),
+  };
+}
+
+interface PoMeta {
+  poNumber: string;
+  shipDate: string;
+  shipSort: string;
+}
+
 const RUN_ORDER: SizeRun[] = ["Toddler", "Little Kid", "Big Kid", "Other"];
 
 type View = "run" | "reorder";
@@ -320,6 +347,81 @@ function SellThruBar({ value }: { value: number }) {
   );
 }
 
+function PoFilter({
+  pos,
+  hidden,
+  onToggle,
+  onShowAll,
+  onHideAll,
+}: {
+  pos: PoMeta[];
+  hidden: Set<string>;
+  onToggle: (po: string) => void;
+  onShowAll: () => void;
+  onHideAll: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (pos.length === 0) return null;
+  const visible = pos.length - hidden.size;
+  return (
+    <div className="relative flex items-center gap-1.5 border-l border-brand-cream-dark pl-2 ml-1">
+      <span className="font-body text-[11px] text-brand-text/40">Orders</span>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`font-body text-xs rounded px-2 py-1 border ${
+          hidden.size === 0
+            ? "bg-brand-cream text-brand-text/70 border-brand-cream-dark"
+            : "bg-indigo-600 text-white border-indigo-600"
+        }`}
+      >
+        {hidden.size === 0 ? "All orders" : `${visible} of ${pos.length}`} ▾
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute top-full left-0 mt-1 z-20 w-72 max-h-72 overflow-auto bg-white border border-brand-cream-dark rounded shadow-lg py-1">
+            <div className="flex gap-3 px-3 py-1.5 border-b border-brand-cream text-xs sticky top-0 bg-white">
+              <button
+                onClick={onShowAll}
+                className="text-brand-green hover:underline"
+              >
+                Select all
+              </button>
+              <button
+                onClick={onHideAll}
+                className="text-brand-text/50 hover:underline"
+              >
+                Clear
+              </button>
+            </div>
+            {pos.map((po) => (
+              <label
+                key={po.poNumber}
+                className="flex items-center gap-2 px-3 py-1 text-xs hover:bg-brand-cream/40 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={!hidden.has(po.poNumber)}
+                  onChange={() => onToggle(po.poNumber)}
+                  className="accent-indigo-600"
+                />
+                <span className="font-medium text-brand-text">
+                  {plainDate(po.poNumber)}
+                </span>
+                {po.shipDate && (
+                  <span className="text-brand-text/40">
+                    · {plainDate(po.shipDate)}
+                  </span>
+                )}
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NikePlannerPage() {
@@ -346,6 +448,7 @@ export default function NikePlannerPage() {
     "all"
   );
   const [classFilter, setClassFilter] = useState<string>("All");
+  const [hiddenPos, setHiddenPos] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
 
   // Distinct classes present in the current snapshot, for the class filter.
@@ -354,6 +457,33 @@ export default function NikePlannerPage() {
     for (const k of skus) if (k.className) set.add(k.className);
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [skus]);
+
+  // Every purchase order in the snapshot, for the orders filter.
+  const allPos = useMemo<PoMeta[]>(() => {
+    const m = new Map<string, PoMeta>();
+    for (const k of skus)
+      for (const po of k.pos ?? [])
+        if (!m.has(po.poNumber))
+          m.set(po.poNumber, {
+            poNumber: po.poNumber,
+            shipDate: po.shipDate,
+            shipSort: po.shipSort,
+          });
+    return [...m.values()].sort(
+      (a, b) =>
+        a.shipSort.localeCompare(b.shipSort) ||
+        a.poNumber.localeCompare(b.poNumber)
+    );
+  }, [skus]);
+
+  // SKUs with any hidden POs removed and on-order recomputed.
+  const visibleSkus = useMemo<PlannerSku[]>(
+    () =>
+      hiddenPos.size === 0
+        ? skus
+        : skus.map((k) => applyPoFilter(k, hiddenPos)),
+    [skus, hiddenPos]
+  );
 
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
   const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(
@@ -455,7 +585,7 @@ export default function NikePlannerPage() {
   // per slice below, since one shoe can live in more than one run.
   const filteredSkus = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return skus.filter((k) => {
+    return visibleSkus.filter((k) => {
       if (genderFilter !== "All" && k.gender !== genderFilter) return false;
       if (classFilter !== "All" && k.className !== classFilter) return false;
       if (
@@ -468,7 +598,7 @@ export default function NikePlannerPage() {
         return false;
       return true;
     });
-  }, [skus, genderFilter, classFilter, search]);
+  }, [visibleSkus, genderFilter, classFilter, search]);
 
   // Split each SKU into per-run slices, then apply the run and on-order filters.
   const slices = useMemo<PlannerSku[]>(() => {
@@ -824,6 +954,22 @@ export default function NikePlannerPage() {
                     ))}
                   </select>
                 </div>
+                <PoFilter
+                  pos={allPos}
+                  hidden={hiddenPos}
+                  onToggle={(po) =>
+                    setHiddenPos((prev) => {
+                      const n = new Set(prev);
+                      if (n.has(po)) n.delete(po);
+                      else n.add(po);
+                      return n;
+                    })
+                  }
+                  onShowAll={() => setHiddenPos(new Set())}
+                  onHideAll={() =>
+                    setHiddenPos(new Set(allPos.map((p) => p.poNumber)))
+                  }
+                />
                 <label className="flex items-center gap-1.5 ml-auto border border-brand-cream-dark rounded px-2 py-1">
                   <Search className="w-3.5 h-3.5 text-brand-text/40" />
                   <input

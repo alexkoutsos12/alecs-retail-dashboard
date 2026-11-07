@@ -115,7 +115,11 @@ interface Accum {
 export async function parseNikeOnOrder(
   buffer: ArrayBuffer
 ): Promise<OnOrderSku[]> {
-  const wb = XLSX.read(buffer, { type: "array" });
+  // raw:true keeps every cell as its literal source text, so a date-formatted
+  // PO name like "04-01-2027" is preserved exactly (and matches RICS) instead
+  // of being coerced into an Excel date serial. Numeric/date columns are parsed
+  // from those strings below.
+  const wb = XLSX.read(buffer, { type: "array", raw: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
     defval: null,
