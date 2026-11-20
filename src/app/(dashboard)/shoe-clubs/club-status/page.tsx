@@ -574,8 +574,9 @@ function CreditsSection({ credits }: { credits: CaptainCredit[] }) {
           </h2>
         </div>
         <p className="font-body text-xs text-brand-text/50 mb-2">
-          Captains who started a new club since the previous report — flagged to
-          be issued a captain&apos;s credit.
+          Captains owed a credit — they started a new club since the previous
+          report, or finished and dropped off the current report without
+          starting a new one yet.
         </p>
       </div>
       {credits.length === 0 ? (
@@ -616,13 +617,21 @@ function CreditsSection({ credits }: { credits: CaptainCredit[] }) {
                     {fmtDate(c.previousStart)}
                   </td>
                   <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/60">
-                    {fmtDate(c.currentStart)}
+                    {c.presentInCurrent ? (
+                      fmtDate(c.currentStart)
+                    ) : (
+                      <span className="text-brand-text/30">not on report</span>
+                    )}
                   </td>
                   <td className="px-3 py-1.5 whitespace-nowrap text-right text-brand-text/60">
                     {money(c.previousBalance)}
                   </td>
                   <td className="px-3 py-1.5 whitespace-nowrap text-right font-semibold">
-                    {money(c.currentBalance)}
+                    {c.presentInCurrent ? (
+                      money(c.currentBalance)
+                    ) : (
+                      <span className="text-brand-text/30">—</span>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -51,11 +51,14 @@ export interface CaptainCredit {
   lastName: string;
   /** Short human-readable reason the credit was flagged. */
   reason: string;
+  /** True = restarted a new club (present in both reports). False = finished
+   *  and dropped off the current report — credit owed, no new club started. */
+  presentInCurrent: boolean;
   previousBalance: number;
   previousStart: string; // ISO, from the older report
-  currentBalance: number;
-  currentStart: string; // ISO, from the newer report
-  clubTotal: number; // current club total
+  currentBalance: number; // 0 when absent from the current report
+  currentStart: string; // ISO, from the newer report ("" when absent)
+  clubTotal: number; // current club total (previous club's when absent)
 }
 
 /**
@@ -64,20 +67,28 @@ export interface CaptainCredit {
  * credit is owed.
  *
  * A captain brings in a club and is advanced the full club total as a charge
- * balance, which they pay down over ~10 weeks. When they start the NEXT club,
- * that balance resets high again. So across two reports we flag a captain
- * (matched by account number, present in both) when either:
- *   1. the club's start date moved forward (a fresh "NEW CLUB" date), or
- *   2. the balance was paid down in the older report and has jumped back up to
- *      a fresh club-sized charge in the newer one.
+ * balance, which they pay down over ~10 weeks. Once that club is paid off the
+ * captain has earned a credit. Two reports together reveal it in two ways:
+ *   1. RESTART — present in both reports and either the club start date moved
+ *      forward (a fresh "NEW CLUB" date) or the balance was paid down and has
+ *      jumped back up to a fresh club-sized charge. The credit offsets the new
+ *      club's charge.
+ *   2. FINISHED, NOT RESTARTED — the captain was on the previous report with a
+ *      paid-down balance and has dropped off the current one. They finished
+ *      and are owed a credit but haven't started a new club yet.
  */
 export function detectCaptainCredits(
   previous: ShoeClubCaptain[],
   current: ShoeClubCaptain[]
 ): CaptainCredit[] {
   const prevByAcct = new Map(previous.map((c) => [c.accountNumber, c]));
+  const curByAcct = new Map(current.map((c) => [c.accountNumber, c]));
   const credits: CaptainCredit[] = [];
 
+  const isPaidDown = (c: ShoeClubCaptain) =>
+    c.currentBalance <= Math.max(0, c.clubTotal * 0.25);
+
+  // Case 1 — restarts (present in both reports).
   for (const cur of current) {
     const prev = prevByAcct.get(cur.accountNumber);
     if (!prev) continue; // not in the older report — can't establish a restart
@@ -88,15 +99,12 @@ export function detectCaptainCredits(
         cur.clubStartDate > prev.clubStartDate
     );
 
-    // Older balance was mostly paid off (<=25% of its club, or completed/credit)
-    const prevPaidDown =
-      prev.currentBalance <= Math.max(0, prev.clubTotal * 0.25);
     // Newer balance is a fresh, club-sized charge that grew vs. the older one.
     const curCharged =
       cur.clubTotal > 0 &&
       cur.currentBalance >= cur.clubTotal * 0.5 &&
       cur.currentBalance > prev.currentBalance;
-    const balanceReset = prevPaidDown && curCharged;
+    const balanceReset = isPaidDown(prev) && curCharged;
 
     if (!startAdvanced && !balanceReset) continue;
 
@@ -107,6 +115,7 @@ export function detectCaptainCredits(
       reason: startAdvanced
         ? "New club start date since last report"
         : "Balance reset to a fresh club charge",
+      presentInCurrent: true,
       previousBalance: prev.currentBalance,
       previousStart: prev.clubStartDate,
       currentBalance: cur.currentBalance,
@@ -115,9 +124,30 @@ export function detectCaptainCredits(
     });
   }
 
-  // Most recently started first, then by name.
+  // Case 2 — finished and dropped off (in previous, paid down, not in current).
+  for (const prev of previous) {
+    if (curByAcct.has(prev.accountNumber)) continue; // still present
+    if (!isPaidDown(prev)) continue; // only flag ones that were at/near paid off
+
+    credits.push({
+      accountNumber: prev.accountNumber,
+      firstName: prev.firstName,
+      lastName: prev.lastName,
+      reason: "Finished — off the current report, new club not started yet",
+      presentInCurrent: false,
+      previousBalance: prev.currentBalance,
+      previousStart: prev.clubStartDate,
+      currentBalance: 0,
+      currentStart: "",
+      clubTotal: prev.clubTotal,
+    });
+  }
+
+  // Restarts first (new club visible), then finished-but-gone; newest start
+  // date first within each, then by name.
   credits.sort(
     (a, b) =>
+      Number(b.presentInCurrent) - Number(a.presentInCurrent) ||
       b.currentStart.localeCompare(a.currentStart) ||
       a.lastName.localeCompare(b.lastName)
   );

@@ -109,8 +109,9 @@ function CreditsCallout({ credits }: { credits: CaptainCredit[] }) {
         </h3>
       </div>
       <p className="font-body text-xs text-amber-800/70 mb-3">
-        These captains appear to have started a new club since the previous
-        report — they should be issued a captain&apos;s credit.
+        These captains are owed a captain&apos;s credit — they either started a
+        new club since the previous report, or finished and dropped off the
+        current report without starting a new one yet.
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-sm font-body min-w-[560px]">
@@ -143,7 +144,7 @@ function CreditsCallout({ credits }: { credits: CaptainCredit[] }) {
                   {money(c.previousBalance)}
                 </td>
                 <td className="px-2 py-1.5 whitespace-nowrap text-right font-semibold text-amber-900">
-                  {money(c.currentBalance)}
+                  {c.presentInCurrent ? money(c.currentBalance) : "—"}
                 </td>
               </tr>
             ))}
