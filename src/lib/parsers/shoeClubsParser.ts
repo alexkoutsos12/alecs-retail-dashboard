@@ -74,11 +74,14 @@ export interface CaptainCredit {
  *      jumped back up to a fresh club-sized charge. The credit offsets the new
  *      club's charge.
  *   2. PAID OFF IN PLACE — present in both reports on the same club, still owed
- *      a meaningful balance in the previous report, now paid down to
- *      completion in the current one. They just finished the club.
- *   3. FINISHED, NOT RESTARTED — the captain was on the previous report with a
- *      paid-down balance and has dropped off the current one. They finished
- *      and are owed a credit but haven't started a new club yet.
+ *      a balance in the previous report, now paid in full (balance $0) in the
+ *      current one. They just finished the club.
+ *   3. FINISHED, NOT RESTARTED — the captain was on the previous report at or
+ *      near paid off and has dropped off the current one. They finished and are
+ *      owed a credit but haven't started a new club yet.
+ *
+ * A club is "complete" only when its balance reaches $0 — not merely paid
+ * down. A captain who still owes anything (even a little) has not finished.
  */
 export function detectCaptainCredits(
   previous: ShoeClubCaptain[],
@@ -88,7 +91,10 @@ export function detectCaptainCredits(
   const curByAcct = new Map(current.map((c) => [c.accountNumber, c]));
   const credits: CaptainCredit[] = [];
 
-  const isPaidDown = (c: ShoeClubCaptain) =>
+  const isComplete = (c: ShoeClubCaptain) => c.currentBalance <= 0;
+  // For a captain who has vanished, we can't see a final $0, so "near done"
+  // (<=25% of the club) in the last report we had is treated as finished.
+  const wasNearDone = (c: ShoeClubCaptain) =>
     c.currentBalance <= Math.max(0, c.clubTotal * 0.25);
 
   // Cases 1 & 2 — captains present in both reports.
@@ -102,21 +108,13 @@ export function detectCaptainCredits(
         cur.clubStartDate > prev.clubStartDate
     );
 
-    // Newer balance is a fresh, club-sized charge that grew vs. the older one.
-    const curCharged =
-      cur.clubTotal > 0 &&
-      cur.currentBalance >= cur.clubTotal * 0.5 &&
-      cur.currentBalance > prev.currentBalance;
-    const balanceReset = isPaidDown(prev) && curCharged;
-
-    // Same club, still owed in the previous report, now paid off → just
+    // Same club, owed money in the previous report, now paid in full → just
     // finished the club in place.
     const paidOffInPlace =
-      !startAdvanced && !isPaidDown(prev) && isPaidDown(cur);
+      !startAdvanced && prev.currentBalance > 0 && isComplete(cur);
 
     let reason = "";
-    if (startAdvanced) reason = "New club start date since last report";
-    else if (balanceReset) reason = "Balance reset to a fresh club charge";
+    if (startAdvanced) reason = "New club started since last report";
     else if (paidOffInPlace) reason = "Club paid off since last report";
     else continue;
 
@@ -134,10 +132,10 @@ export function detectCaptainCredits(
     });
   }
 
-  // Case 3 — finished and dropped off (in previous, paid down, not in current).
+  // Case 3 — finished and dropped off (in previous, near/at paid off, gone now).
   for (const prev of previous) {
     if (curByAcct.has(prev.accountNumber)) continue; // still present
-    if (!isPaidDown(prev)) continue; // only flag ones that were at/near paid off
+    if (!wasNearDone(prev)) continue; // only flag ones that were at/near paid off
 
     credits.push({
       accountNumber: prev.accountNumber,

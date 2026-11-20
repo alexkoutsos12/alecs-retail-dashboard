@@ -109,9 +109,10 @@ function CreditsCallout({ credits }: { credits: CaptainCredit[] }) {
         </h3>
       </div>
       <p className="font-body text-xs text-amber-800/70 mb-3">
-        These captains are owed a captain&apos;s credit — they either started a
-        new club since the previous report, or finished and dropped off the
-        current report without starting a new one yet.
+        These captains are owed a captain&apos;s credit — they paid a club off
+        in full, started a new club since the previous report, or finished and
+        dropped off the current report. You can check them off as issued on the
+        Club Status page.
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-sm font-body min-w-[560px]">
@@ -368,6 +369,7 @@ export default function ShoeClubsImportPage() {
         comparedToPrevious,
         creditsCount: credits.length,
         captainCredits: credits,
+        issuedCreditAccounts: [],
         storagePath,
       });
 

@@ -11,8 +11,13 @@ import {
   orderBy,
   limit,
   getDocs,
+  doc,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
 } from "firebase/firestore";
 import { ref as storageRef, getDownloadURL } from "firebase/storage";
+import toast from "react-hot-toast";
 import type {
   ShoeClubCaptain,
   CaptainCredit,
@@ -29,6 +34,7 @@ interface ReportMeta {
   newClubCount: number;
   comparedToPrevious: boolean;
   captainCredits: CaptainCredit[];
+  issuedCreditAccounts: string[];
   storagePath: string;
 }
 
@@ -143,6 +149,7 @@ export default function ClubStatusPage() {
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<ReportMeta | null>(null);
   const [captains, setCaptains] = useState<ShoeClubCaptain[]>([]);
+  const [issued, setIssued] = useState<Set<string>>(new Set());
   const [outstandingSort, setOutstandingSort] = useState<
     "delinquency" | "name"
   >("delinquency");
@@ -180,9 +187,11 @@ export default function ClubStatusPage() {
         newClubCount: data.newClubCount ?? 0,
         comparedToPrevious: data.comparedToPrevious ?? false,
         captainCredits: (data.captainCredits ?? []) as CaptainCredit[],
+        issuedCreditAccounts: (data.issuedCreditAccounts ?? []) as string[],
         storagePath: data.storagePath ?? "",
       };
       setReport(meta);
+      setIssued(new Set(meta.issuedCreditAccounts));
 
       const url = await getDownloadURL(storageRef(storage, meta.storagePath));
       const res = await fetch(
@@ -225,6 +234,37 @@ export default function ClubStatusPage() {
       .sort(byLast);
     return { outstanding, completed, newClub };
   }, [captains, outstandingSort]);
+
+  const toggleIssued = useCallback(
+    async (accountNumber: string) => {
+      if (!report) return;
+      const willIssue = !issued.has(accountNumber);
+      // Optimistic update.
+      setIssued((prev) => {
+        const n = new Set(prev);
+        if (willIssue) n.add(accountNumber);
+        else n.delete(accountNumber);
+        return n;
+      });
+      try {
+        await updateDoc(doc(db, "reports", report.id), {
+          issuedCreditAccounts: willIssue
+            ? arrayUnion(accountNumber)
+            : arrayRemove(accountNumber),
+        });
+      } catch {
+        // Revert on failure.
+        setIssued((prev) => {
+          const n = new Set(prev);
+          if (willIssue) n.delete(accountNumber);
+          else n.add(accountNumber);
+          return n;
+        });
+        toast.error("Couldn't save — try again.");
+      }
+    },
+    [report, issued]
+  );
 
   // ─── Render ─────────────────────────────────────────────────
 
@@ -472,7 +512,11 @@ export default function ClubStatusPage() {
 
       {/* ─── Captain credits (from two-report comparison) ─── */}
       {report.comparedToPrevious && (
-        <CreditsSection credits={report.captainCredits} />
+        <CreditsSection
+          credits={report.captainCredits}
+          issued={issued}
+          onToggleIssued={toggleIssued}
+        />
       )}
 
       {/* ─── 1. Outstanding ─── */}
@@ -560,7 +604,25 @@ function SummaryTile({
 
 // ─── Captain credits ────────────────────────────────────────────
 
-function CreditsSection({ credits }: { credits: CaptainCredit[] }) {
+function CreditsSection({
+  credits,
+  issued,
+  onToggleIssued,
+}: {
+  credits: CaptainCredit[];
+  issued: Set<string>;
+  onToggleIssued: (accountNumber: string) => void;
+}) {
+  // Un-issued first (the to-do list), issued ones sink to the bottom; original
+  // order preserved within each group.
+  const ordered = [...credits].sort(
+    (a, b) =>
+      Number(issued.has(a.accountNumber)) - Number(issued.has(b.accountNumber))
+  );
+  const issuedCount = credits.filter((c) =>
+    issued.has(c.accountNumber)
+  ).length;
+  const remaining = credits.length - issuedCount;
   return (
     <section className="club-section mb-8">
       <div className="section-lead">
@@ -569,23 +631,25 @@ function CreditsSection({ credits }: { credits: CaptainCredit[] }) {
             <Award className="w-5 h-5" />
             Captain Credits{" "}
             <span className="text-brand-text/40 font-normal text-base">
-              ({credits.length})
+              ({remaining} to issue
+              {issuedCount > 0 ? ` · ${issuedCount} issued` : ""})
             </span>
           </h2>
         </div>
         <p className="font-body text-xs text-brand-text/50 mb-2">
-          Captains owed a credit — they started a new club since the previous
-          report, or finished and dropped off the current report without
-          starting a new one yet.
+          Captains owed a credit — they paid a club off in full, started a new
+          club, or finished and dropped off the report. Check one off once the
+          credit has been issued.
         </p>
       </div>
       {credits.length === 0 ? (
         <EmptyCard text="No captain credits flagged in this comparison." />
       ) : (
         <div className="club-card bg-white border-l-[3px] border-amber-500 rounded overflow-hidden overflow-x-auto">
-          <table className="w-full text-sm font-body min-w-[720px]">
+          <table className="w-full text-sm font-body min-w-[760px]">
             <thead>
               <tr className="border-b border-brand-cream-dark text-left text-brand-text/50 text-xs">
+                <th className="px-3 py-2 font-normal text-center">Issued</th>
                 <th className="px-3 py-2 font-normal">Captain</th>
                 <th className="px-3 py-2 font-normal">Account</th>
                 <th className="px-3 py-2 font-normal">Why flagged</th>
@@ -596,45 +660,63 @@ function CreditsSection({ credits }: { credits: CaptainCredit[] }) {
               </tr>
             </thead>
             <tbody>
-              {credits.map((c) => (
-                <tr
-                  key={c.accountNumber}
-                  className="border-b border-brand-cream last:border-0"
-                >
-                  <td className="px-3 py-1.5 whitespace-nowrap font-medium">
-                    {(c.lastName || "").toUpperCase()}
-                    {c.firstName
-                      ? `, ${c.firstName.charAt(0).toUpperCase()}`
-                      : ""}
-                  </td>
-                  <td className="px-3 py-1.5 whitespace-nowrap font-mono text-xs text-brand-text/60">
-                    {c.accountNumber}
-                  </td>
-                  <td className="px-3 py-1.5 text-xs text-brand-text/70">
-                    {c.reason}
-                  </td>
-                  <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/60">
-                    {fmtDate(c.previousStart)}
-                  </td>
-                  <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/60">
-                    {c.presentInCurrent ? (
-                      fmtDate(c.currentStart)
-                    ) : (
-                      <span className="text-brand-text/30">not on report</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-1.5 whitespace-nowrap text-right text-brand-text/60">
-                    {money(c.previousBalance)}
-                  </td>
-                  <td className="px-3 py-1.5 whitespace-nowrap text-right font-semibold">
-                    {c.presentInCurrent ? (
-                      money(c.currentBalance)
-                    ) : (
-                      <span className="text-brand-text/30">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {ordered.map((c) => {
+                const done = issued.has(c.accountNumber);
+                return (
+                  <tr
+                    key={c.accountNumber}
+                    className={`border-b border-brand-cream last:border-0 ${
+                      done ? "bg-brand-cream/30 text-brand-text/40" : ""
+                    }`}
+                  >
+                    <td className="px-3 py-1.5 text-center">
+                      <input
+                        type="checkbox"
+                        checked={done}
+                        onChange={() => onToggleIssued(c.accountNumber)}
+                        className="accent-amber-600 w-4 h-4 cursor-pointer"
+                        title={done ? "Mark as not issued" : "Mark credit issued"}
+                      />
+                    </td>
+                    <td
+                      className={`px-3 py-1.5 whitespace-nowrap font-medium ${
+                        done ? "line-through" : ""
+                      }`}
+                    >
+                      {(c.lastName || "").toUpperCase()}
+                      {c.firstName
+                        ? `, ${c.firstName.charAt(0).toUpperCase()}`
+                        : ""}
+                    </td>
+                    <td className="px-3 py-1.5 whitespace-nowrap font-mono text-xs text-brand-text/60">
+                      {c.accountNumber}
+                    </td>
+                    <td className="px-3 py-1.5 text-xs text-brand-text/70">
+                      {c.reason}
+                    </td>
+                    <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/60">
+                      {fmtDate(c.previousStart)}
+                    </td>
+                    <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/60">
+                      {c.presentInCurrent ? (
+                        fmtDate(c.currentStart)
+                      ) : (
+                        <span className="text-brand-text/30">not on report</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 whitespace-nowrap text-right text-brand-text/60">
+                      {money(c.previousBalance)}
+                    </td>
+                    <td className="px-3 py-1.5 whitespace-nowrap text-right font-semibold">
+                      {c.presentInCurrent ? (
+                        money(c.currentBalance)
+                      ) : (
+                        <span className="text-brand-text/30">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
