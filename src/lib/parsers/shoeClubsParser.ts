@@ -73,7 +73,10 @@ export interface CaptainCredit {
  *      forward (a fresh "NEW CLUB" date) or the balance was paid down and has
  *      jumped back up to a fresh club-sized charge. The credit offsets the new
  *      club's charge.
- *   2. FINISHED, NOT RESTARTED — the captain was on the previous report with a
+ *   2. PAID OFF IN PLACE — present in both reports on the same club, still owed
+ *      a meaningful balance in the previous report, now paid down to
+ *      completion in the current one. They just finished the club.
+ *   3. FINISHED, NOT RESTARTED — the captain was on the previous report with a
  *      paid-down balance and has dropped off the current one. They finished
  *      and are owed a credit but haven't started a new club yet.
  */
@@ -88,10 +91,10 @@ export function detectCaptainCredits(
   const isPaidDown = (c: ShoeClubCaptain) =>
     c.currentBalance <= Math.max(0, c.clubTotal * 0.25);
 
-  // Case 1 — restarts (present in both reports).
+  // Cases 1 & 2 — captains present in both reports.
   for (const cur of current) {
     const prev = prevByAcct.get(cur.accountNumber);
-    if (!prev) continue; // not in the older report — can't establish a restart
+    if (!prev) continue; // not in the older report — can't establish a change
 
     const startAdvanced = Boolean(
       cur.clubStartDate &&
@@ -106,15 +109,22 @@ export function detectCaptainCredits(
       cur.currentBalance > prev.currentBalance;
     const balanceReset = isPaidDown(prev) && curCharged;
 
-    if (!startAdvanced && !balanceReset) continue;
+    // Same club, still owed in the previous report, now paid off → just
+    // finished the club in place.
+    const paidOffInPlace =
+      !startAdvanced && !isPaidDown(prev) && isPaidDown(cur);
+
+    let reason = "";
+    if (startAdvanced) reason = "New club start date since last report";
+    else if (balanceReset) reason = "Balance reset to a fresh club charge";
+    else if (paidOffInPlace) reason = "Club paid off since last report";
+    else continue;
 
     credits.push({
       accountNumber: cur.accountNumber,
       firstName: cur.firstName,
       lastName: cur.lastName,
-      reason: startAdvanced
-        ? "New club start date since last report"
-        : "Balance reset to a fresh club charge",
+      reason,
       presentInCurrent: true,
       previousBalance: prev.currentBalance,
       previousStart: prev.clubStartDate,
@@ -124,7 +134,7 @@ export function detectCaptainCredits(
     });
   }
 
-  // Case 2 — finished and dropped off (in previous, paid down, not in current).
+  // Case 3 — finished and dropped off (in previous, paid down, not in current).
   for (const prev of previous) {
     if (curByAcct.has(prev.accountNumber)) continue; // still present
     if (!isPaidDown(prev)) continue; // only flag ones that were at/near paid off
