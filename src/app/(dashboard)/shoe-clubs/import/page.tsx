@@ -9,7 +9,7 @@ import {
   ChangeEvent,
 } from "react";
 import Link from "next/link";
-import { Upload, CheckCircle, AlertCircle, Trash2 } from "lucide-react";
+import { Upload, CheckCircle, AlertCircle, Trash2, Award } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { db, storage } from "@/lib/firebase";
 import {
@@ -30,7 +30,11 @@ import {
   uploadBytes,
   deleteObject,
 } from "firebase/storage";
-import { parseShoeClubs } from "@/lib/parsers/shoeClubsParser";
+import {
+  parseShoeClubs,
+  detectCaptainCredits,
+  type CaptainCredit,
+} from "@/lib/parsers/shoeClubsParser";
 
 type ImportState = "idle" | "parsing" | "uploading" | "success" | "error";
 
@@ -55,6 +59,8 @@ interface SuccessData {
   outstandingCount: number;
   completedCount: number;
   newClubCount: number;
+  comparedToPrevious: boolean;
+  credits: CaptainCredit[];
 }
 
 function formatDate(dateStr: string): string {
@@ -72,12 +78,161 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function money(n: number): string {
+  return n.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
+function CreditsCallout({ credits }: { credits: CaptainCredit[] }) {
+  if (credits.length === 0) {
+    return (
+      <div className="bg-brand-cream/50 border border-brand-cream-dark rounded p-4 mb-5 flex items-center gap-2">
+        <Award className="w-4 h-4 text-brand-text/40 shrink-0" />
+        <p className="font-body text-sm text-brand-text/60">
+          No captain credits flagged — no captains started a new club since the
+          previous report.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="bg-amber-50 border border-amber-300 rounded p-4 mb-5">
+      <div className="flex items-center gap-2 mb-3">
+        <Award className="w-5 h-5 text-amber-600 shrink-0" />
+        <h3 className="font-heading text-amber-800 text-base font-bold">
+          {credits.length} Captain Credit{credits.length === 1 ? "" : "s"} to
+          issue
+        </h3>
+      </div>
+      <p className="font-body text-xs text-amber-800/70 mb-3">
+        These captains appear to have started a new club since the previous
+        report — they should be issued a captain&apos;s credit.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm font-body min-w-[560px]">
+          <thead>
+            <tr className="text-left text-amber-800/60 text-xs border-b border-amber-200">
+              <th className="px-2 py-1.5 font-normal">Captain</th>
+              <th className="px-2 py-1.5 font-normal">Account</th>
+              <th className="px-2 py-1.5 font-normal">Why flagged</th>
+              <th className="px-2 py-1.5 font-normal text-right">Prev bal.</th>
+              <th className="px-2 py-1.5 font-normal text-right">New bal.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {credits.map((c) => (
+              <tr
+                key={c.accountNumber}
+                className="border-b border-amber-100 last:border-0"
+              >
+                <td className="px-2 py-1.5 whitespace-nowrap font-medium text-amber-900">
+                  {(c.lastName || "").toUpperCase()}
+                  {c.firstName ? `, ${c.firstName.charAt(0).toUpperCase()}` : ""}
+                </td>
+                <td className="px-2 py-1.5 whitespace-nowrap font-mono text-xs text-amber-800/70">
+                  {c.accountNumber}
+                </td>
+                <td className="px-2 py-1.5 text-xs text-amber-800/80">
+                  {c.reason}
+                </td>
+                <td className="px-2 py-1.5 whitespace-nowrap text-right text-amber-800/70">
+                  {money(c.previousBalance)}
+                </td>
+                <td className="px-2 py-1.5 whitespace-nowrap text-right font-semibold text-amber-900">
+                  {money(c.currentBalance)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function DropZone({
+  label,
+  hint,
+  file,
+  onFile,
+}: {
+  label: string;
+  hint: string;
+  file: File | null;
+  onFile: (f: File | null) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [drag, setDrag] = useState(false);
+  const accept = (f: File | undefined) => {
+    if (f && f.name.toLowerCase().endsWith(".csv")) onFile(f);
+  };
+  return (
+    <div>
+      <p className="font-body text-xs font-semibold text-brand-text/70 mb-1">
+        {label}
+      </p>
+      <p className="font-body text-[11px] text-brand-text/40 mb-1.5">{hint}</p>
+      <div
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e: DragEvent) => {
+          e.preventDefault();
+          setDrag(true);
+        }}
+        onDragLeave={(e: DragEvent) => {
+          e.preventDefault();
+          setDrag(false);
+        }}
+        onDrop={(e: DragEvent) => {
+          e.preventDefault();
+          setDrag(false);
+          accept(e.dataTransfer.files[0]);
+        }}
+        className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+          drag
+            ? "border-brand-green bg-brand-green/5"
+            : "border-brand-cream-dark hover:border-brand-green/40"
+        }`}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".csv"
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            accept(e.target.files?.[0])
+          }
+          className="hidden"
+        />
+        <Upload
+          className={`w-7 h-7 mx-auto mb-2 ${
+            drag ? "text-brand-green" : "text-brand-cream-dark"
+          }`}
+        />
+        {file ? (
+          <p className="font-body text-sm text-brand-text">
+            <span className="font-semibold break-all">{file.name}</span>
+            <span className="text-brand-text/40 text-xs mt-1 block">
+              Click to change
+            </span>
+          </p>
+        ) : (
+          <p className="font-body text-sm text-brand-text/50">
+            Drag &amp; drop a .csv, or click to browse
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ShoeClubsImportPage() {
   const { user } = useAuth();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previousFile, setPreviousFile] = useState<File | null>(null);
 
   const [importState, setImportState] = useState<ImportState>("idle");
   const [successData, setSuccessData] = useState<SuccessData | null>(null);
@@ -137,36 +292,12 @@ export default function ShoeClubsImportPage() {
     }
   };
 
-  const handleFile = (file: File) => {
-    if (!file.name.toLowerCase().endsWith(".csv")) return;
-    setSelectedFile(file);
-  };
-
-  const handleDragOver = (e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-  const handleDragLeave = (e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  };
-  const handleDrop = (e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  };
-  const handleFileInput = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
-  };
-
   const reset = () => {
     setImportState("idle");
     setSelectedFile(null);
+    setPreviousFile(null);
     setSuccessData(null);
     setErrorMessage("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleImport = async () => {
@@ -186,6 +317,20 @@ export default function ShoeClubsImportPage() {
         throw new Error(
           "No captains found in this file. Make sure the file is a RICS Captains List CSV export."
         );
+      }
+
+      // Optional previous report → flag captains owed a captain's credit.
+      let credits: CaptainCredit[] = [];
+      const comparedToPrevious = Boolean(previousFile);
+      if (previousFile) {
+        const prevContent = await previousFile.text();
+        const prevResult = parseShoeClubs(prevContent);
+        if (prevResult.captains.length === 0) {
+          throw new Error(
+            "No captains found in the previous report. Make sure it is a RICS Captains List CSV export."
+          );
+        }
+        credits = detectCaptainCredits(prevResult.captains, captains);
       }
 
       setImportState("uploading");
@@ -219,6 +364,9 @@ export default function ShoeClubsImportPage() {
         outstandingCount: counts.outstanding,
         completedCount: counts.completed,
         newClubCount: counts.newClub,
+        comparedToPrevious,
+        creditsCount: credits.length,
+        captainCredits: credits,
         storagePath,
       });
 
@@ -229,6 +377,8 @@ export default function ShoeClubsImportPage() {
         outstandingCount: counts.outstanding,
         completedCount: counts.completed,
         newClubCount: counts.newClub,
+        comparedToPrevious,
+        credits,
       });
       setImportState("success");
       toast.success("Captains list imported successfully.");
@@ -276,52 +426,34 @@ export default function ShoeClubsImportPage() {
         Import — Shoe Clubs
       </h1>
       <p className="text-brand-text/50 font-body text-sm mb-6">
-        Upload a RICS Captains List (.csv)
+        Upload the newest RICS Captains List (.csv). Add the previous report too
+        and we&apos;ll flag captains owed a captain&apos;s credit.
       </p>
 
-      {/* IDLE — upload zone */}
+      {/* IDLE — upload zones */}
       {importState === "idle" && (
         <div className="bg-white border-l-[3px] border-brand-green rounded p-6 mb-6">
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition-colors ${
-              isDragging
-                ? "border-brand-green bg-brand-green/5"
-                : "border-brand-cream-dark hover:border-brand-green/40"
-            }`}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              onChange={handleFileInput}
-              className="hidden"
+          <div className="grid md:grid-cols-2 gap-4">
+            <DropZone
+              label="Current report (newest)"
+              hint="Required — this is the one that gets saved."
+              file={selectedFile}
+              onFile={setSelectedFile}
             />
-            <Upload
-              className={`w-8 h-8 mx-auto mb-3 ${
-                isDragging ? "text-brand-green" : "text-brand-cream-dark"
-              }`}
+            <DropZone
+              label="Previous report"
+              hint="Optional — compared to the current one to flag captain credits."
+              file={previousFile}
+              onFile={setPreviousFile}
             />
-            {selectedFile ? (
-              <p className="font-body text-sm text-brand-text">
-                <span className="font-semibold">{selectedFile.name}</span>
-                <br />
-                <span className="text-brand-text/40 text-xs mt-1 block">
-                  Click to change file
-                </span>
-              </p>
-            ) : (
-              <p className="font-body text-sm text-brand-text/50">
-                Drag &amp; drop your RICS Captains List (.csv) here, or click
-                to browse
-              </p>
-            )}
           </div>
 
-          <div className="flex justify-end mt-4">
+          <div className="flex items-center justify-end gap-3 mt-4">
+            {selectedFile && !previousFile && (
+              <span className="font-body text-xs text-brand-text/40">
+                Add a previous report to check for captain credits.
+              </span>
+            )}
             <button
               onClick={handleImport}
               disabled={!selectedFile}
@@ -389,6 +521,10 @@ export default function ShoeClubsImportPage() {
               value={String(successData.newClubCount)}
             />
           </div>
+
+          {successData.comparedToPrevious && (
+            <CreditsCallout credits={successData.credits} />
+          )}
 
           <div className="flex flex-wrap gap-3 items-center">
             <Link

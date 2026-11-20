@@ -1665,7 +1665,14 @@ function SizeGrid({ sku }: { sku: PlannerSku }) {
           SKU <span className="text-brand-text/70">{sku.sku}</span>
         </span>
         <span>
-          Price <span className="text-brand-text/70">${sku.retailPrice.toFixed(2)}</span>
+          Retail{" "}
+          <span className="text-brand-text/70">
+            ${sku.retailPrice.toFixed(2)}
+          </span>
+        </span>
+        <span>
+          Cost{" "}
+          <span className="text-brand-text/70">${sku.cost.toFixed(2)}</span>
         </span>
         <span>
           Margin <span className="text-brand-text/70">{pct(sku.marginPct)}</span>

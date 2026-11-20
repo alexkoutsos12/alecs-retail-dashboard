@@ -42,6 +42,88 @@ export interface ShoeClubsResult {
   };
 }
 
+// A captain flagged as owed a "captain's credit" — found by comparing a newer
+// report against an older one. A credit is due when a captain has started a
+// NEW club since the previous report, which the two reports together reveal.
+export interface CaptainCredit {
+  accountNumber: string;
+  firstName: string;
+  lastName: string;
+  /** Short human-readable reason the credit was flagged. */
+  reason: string;
+  previousBalance: number;
+  previousStart: string; // ISO, from the older report
+  currentBalance: number;
+  currentStart: string; // ISO, from the newer report
+  clubTotal: number; // current club total
+}
+
+/**
+ * Compare an older captains report against a newer one and flag captains who
+ * appear to have started a new club in between — the signal that a captain's
+ * credit is owed.
+ *
+ * A captain brings in a club and is advanced the full club total as a charge
+ * balance, which they pay down over ~10 weeks. When they start the NEXT club,
+ * that balance resets high again. So across two reports we flag a captain
+ * (matched by account number, present in both) when either:
+ *   1. the club's start date moved forward (a fresh "NEW CLUB" date), or
+ *   2. the balance was paid down in the older report and has jumped back up to
+ *      a fresh club-sized charge in the newer one.
+ */
+export function detectCaptainCredits(
+  previous: ShoeClubCaptain[],
+  current: ShoeClubCaptain[]
+): CaptainCredit[] {
+  const prevByAcct = new Map(previous.map((c) => [c.accountNumber, c]));
+  const credits: CaptainCredit[] = [];
+
+  for (const cur of current) {
+    const prev = prevByAcct.get(cur.accountNumber);
+    if (!prev) continue; // not in the older report — can't establish a restart
+
+    const startAdvanced = Boolean(
+      cur.clubStartDate &&
+        prev.clubStartDate &&
+        cur.clubStartDate > prev.clubStartDate
+    );
+
+    // Older balance was mostly paid off (<=25% of its club, or completed/credit)
+    const prevPaidDown =
+      prev.currentBalance <= Math.max(0, prev.clubTotal * 0.25);
+    // Newer balance is a fresh, club-sized charge that grew vs. the older one.
+    const curCharged =
+      cur.clubTotal > 0 &&
+      cur.currentBalance >= cur.clubTotal * 0.5 &&
+      cur.currentBalance > prev.currentBalance;
+    const balanceReset = prevPaidDown && curCharged;
+
+    if (!startAdvanced && !balanceReset) continue;
+
+    credits.push({
+      accountNumber: cur.accountNumber,
+      firstName: cur.firstName,
+      lastName: cur.lastName,
+      reason: startAdvanced
+        ? "New club start date since last report"
+        : "Balance reset to a fresh club charge",
+      previousBalance: prev.currentBalance,
+      previousStart: prev.clubStartDate,
+      currentBalance: cur.currentBalance,
+      currentStart: cur.clubStartDate,
+      clubTotal: cur.clubTotal,
+    });
+  }
+
+  // Most recently started first, then by name.
+  credits.sort(
+    (a, b) =>
+      b.currentStart.localeCompare(a.currentStart) ||
+      a.lastName.localeCompare(b.lastName)
+  );
+  return credits;
+}
+
 // ─── CSV tokenizer ──────────────────────────────────────────────────────
 //
 // The RICS export embeds newlines inside quoted AddressLine fields, so

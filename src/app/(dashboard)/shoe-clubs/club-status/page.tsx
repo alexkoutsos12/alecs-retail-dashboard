@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
-import { Printer, AlertTriangle } from "lucide-react";
+import { Printer, AlertTriangle, Award } from "lucide-react";
 import { db, storage } from "@/lib/firebase";
 import {
   collection,
@@ -13,7 +13,10 @@ import {
   getDocs,
 } from "firebase/firestore";
 import { ref as storageRef, getDownloadURL } from "firebase/storage";
-import type { ShoeClubCaptain } from "@/lib/parsers/shoeClubsParser";
+import type {
+  ShoeClubCaptain,
+  CaptainCredit,
+} from "@/lib/parsers/shoeClubsParser";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -24,6 +27,8 @@ interface ReportMeta {
   outstandingCount: number;
   completedCount: number;
   newClubCount: number;
+  comparedToPrevious: boolean;
+  captainCredits: CaptainCredit[];
   storagePath: string;
 }
 
@@ -138,6 +143,9 @@ export default function ClubStatusPage() {
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<ReportMeta | null>(null);
   const [captains, setCaptains] = useState<ShoeClubCaptain[]>([]);
+  const [outstandingSort, setOutstandingSort] = useState<
+    "delinquency" | "name"
+  >("delinquency");
 
   useEffect(() => {
     document.title = "Club Status · Shoe Clubs";
@@ -170,6 +178,8 @@ export default function ClubStatusPage() {
         outstandingCount: data.outstandingCount ?? 0,
         completedCount: data.completedCount ?? 0,
         newClubCount: data.newClubCount ?? 0,
+        comparedToPrevious: data.comparedToPrevious ?? false,
+        captainCredits: (data.captainCredits ?? []) as CaptainCredit[],
         storagePath: data.storagePath ?? "",
       };
       setReport(meta);
@@ -202,7 +212,11 @@ export default function ClubStatusPage() {
       a.firstName.localeCompare(b.firstName);
     const outstanding = captains
       .filter((c) => c.category === "outstanding")
-      .sort((a, b) => a.weeksBehind - b.weeksBehind || byLast(a, b));
+      .sort(
+        outstandingSort === "name"
+          ? byLast
+          : (a, b) => a.weeksBehind - b.weeksBehind || byLast(a, b)
+      );
     const completed = captains
       .filter((c) => c.category === "completed")
       .sort(byLast);
@@ -210,7 +224,7 @@ export default function ClubStatusPage() {
       .filter((c) => c.category === "new-club")
       .sort(byLast);
     return { outstanding, completed, newClub };
-  }, [captains]);
+  }, [captains, outstandingSort]);
 
   // ─── Render ─────────────────────────────────────────────────
 
@@ -456,11 +470,25 @@ export default function ClubStatusPage() {
         />
       </div>
 
+      {/* ─── Captain credits (from two-report comparison) ─── */}
+      {report.comparedToPrevious && (
+        <CreditsSection credits={report.captainCredits} />
+      )}
+
       {/* ─── 1. Outstanding ─── */}
       <Section
         title="Outstanding Balance"
-        subtitle="Active clubs with money still owed — most delinquent first."
+        subtitle={
+          outstandingSort === "name"
+            ? "Active clubs with money still owed — sorted by last name."
+            : "Active clubs with money still owed — most delinquent first."
+        }
         count={groups.outstanding.length}
+        action={
+          groups.outstanding.length > 0 ? (
+            <SortToggle value={outstandingSort} onChange={setOutstandingSort} />
+          ) : undefined
+        }
       >
         {groups.outstanding.length === 0 ? (
           <EmptyCard text="No active clubs with outstanding balances." />
@@ -530,31 +558,142 @@ function SummaryTile({
   );
 }
 
+// ─── Captain credits ────────────────────────────────────────────
+
+function CreditsSection({ credits }: { credits: CaptainCredit[] }) {
+  return (
+    <section className="club-section mb-8">
+      <div className="section-lead">
+        <div className="flex items-baseline gap-2 mb-1">
+          <h2 className="font-heading text-amber-700 text-lg font-bold flex items-center gap-2">
+            <Award className="w-5 h-5" />
+            Captain Credits{" "}
+            <span className="text-brand-text/40 font-normal text-base">
+              ({credits.length})
+            </span>
+          </h2>
+        </div>
+        <p className="font-body text-xs text-brand-text/50 mb-2">
+          Captains who started a new club since the previous report — flagged to
+          be issued a captain&apos;s credit.
+        </p>
+      </div>
+      {credits.length === 0 ? (
+        <EmptyCard text="No captain credits flagged in this comparison." />
+      ) : (
+        <div className="club-card bg-white border-l-[3px] border-amber-500 rounded overflow-hidden overflow-x-auto">
+          <table className="w-full text-sm font-body min-w-[720px]">
+            <thead>
+              <tr className="border-b border-brand-cream-dark text-left text-brand-text/50 text-xs">
+                <th className="px-3 py-2 font-normal">Captain</th>
+                <th className="px-3 py-2 font-normal">Account</th>
+                <th className="px-3 py-2 font-normal">Why flagged</th>
+                <th className="px-3 py-2 font-normal">Prev start</th>
+                <th className="px-3 py-2 font-normal">New start</th>
+                <th className="px-3 py-2 font-normal text-right">Prev bal.</th>
+                <th className="px-3 py-2 font-normal text-right">New bal.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {credits.map((c) => (
+                <tr
+                  key={c.accountNumber}
+                  className="border-b border-brand-cream last:border-0"
+                >
+                  <td className="px-3 py-1.5 whitespace-nowrap font-medium">
+                    {(c.lastName || "").toUpperCase()}
+                    {c.firstName
+                      ? `, ${c.firstName.charAt(0).toUpperCase()}`
+                      : ""}
+                  </td>
+                  <td className="px-3 py-1.5 whitespace-nowrap font-mono text-xs text-brand-text/60">
+                    {c.accountNumber}
+                  </td>
+                  <td className="px-3 py-1.5 text-xs text-brand-text/70">
+                    {c.reason}
+                  </td>
+                  <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/60">
+                    {fmtDate(c.previousStart)}
+                  </td>
+                  <td className="px-3 py-1.5 whitespace-nowrap text-brand-text/60">
+                    {fmtDate(c.currentStart)}
+                  </td>
+                  <td className="px-3 py-1.5 whitespace-nowrap text-right text-brand-text/60">
+                    {money(c.previousBalance)}
+                  </td>
+                  <td className="px-3 py-1.5 whitespace-nowrap text-right font-semibold">
+                    {money(c.currentBalance)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ─── Section shell ──────────────────────────────────────────────
 
 function Section({
   title,
   subtitle,
   count,
+  action,
   children,
 }: {
   title: string;
   subtitle: string;
   count: number;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="club-section mb-8">
       <div className="section-lead">
-        <div className="flex items-baseline gap-2 mb-1">
+        <div className="flex items-baseline justify-between gap-2 mb-1">
           <h2 className="font-heading text-brand-green text-lg font-bold">
             {title} <span className="text-brand-text/40 font-normal text-base">({count})</span>
           </h2>
+          {action && <div className="no-print">{action}</div>}
         </div>
         <p className="font-body text-xs text-brand-text/50 mb-2">{subtitle}</p>
       </div>
       {children}
     </section>
+  );
+}
+
+function SortToggle({
+  value,
+  onChange,
+}: {
+  value: "delinquency" | "name";
+  onChange: (v: "delinquency" | "name") => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 text-xs font-body">
+      <span className="text-brand-text/40 mr-1">Sort</span>
+      {(
+        [
+          ["delinquency", "Most delinquent"],
+          ["name", "Last name A–Z"],
+        ] as const
+      ).map(([val, lbl]) => (
+        <button
+          key={val}
+          onClick={() => onChange(val)}
+          className={`px-2.5 py-1 rounded transition-colors ${
+            value === val
+              ? "bg-brand-green text-brand-cream"
+              : "bg-brand-cream text-brand-text/70 hover:bg-brand-cream-dark"
+          }`}
+        >
+          {lbl}
+        </button>
+      ))}
+    </div>
   );
 }
 
