@@ -33,6 +33,7 @@ interface ReportMeta {
   completedCount: number;
   newClubCount: number;
   comparedToPrevious: boolean;
+  comparedToDate: string;
   captainCredits: CaptainCredit[];
   issuedCreditAccounts: string[];
   storagePath: string;
@@ -186,6 +187,7 @@ export default function ClubStatusPage() {
         completedCount: data.completedCount ?? 0,
         newClubCount: data.newClubCount ?? 0,
         comparedToPrevious: data.comparedToPrevious ?? false,
+        comparedToDate: (data.comparedToDate ?? "") as string,
         captainCredits: (data.captainCredits ?? []) as CaptainCredit[],
         issuedCreditAccounts: (data.issuedCreditAccounts ?? []) as string[],
         storagePath: data.storagePath ?? "",
@@ -514,6 +516,7 @@ export default function ClubStatusPage() {
       {report.comparedToPrevious && (
         <CreditsSection
           credits={report.captainCredits}
+          comparedToDate={report.comparedToDate}
           issued={issued}
           onToggleIssued={toggleIssued}
         />
@@ -606,10 +609,12 @@ function SummaryTile({
 
 function CreditsSection({
   credits,
+  comparedToDate,
   issued,
   onToggleIssued,
 }: {
   credits: CaptainCredit[];
+  comparedToDate: string;
   issued: Set<string>;
   onToggleIssued: (accountNumber: string) => void;
 }) {
@@ -638,8 +643,9 @@ function CreditsSection({
         </div>
         <p className="font-body text-xs text-brand-text/50 mb-2">
           Captains owed a credit — they paid a club off in full, started a new
-          club, or finished and dropped off the report. Check one off once the
-          credit has been issued.
+          club, or finished and dropped off the report
+          {comparedToDate ? ` (vs. the ${fmtDate(comparedToDate)} import)` : ""}.
+          Check one off once the credit has been issued.
         </p>
       </div>
       {credits.length === 0 ? (

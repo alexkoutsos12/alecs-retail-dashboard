@@ -29,7 +29,9 @@ import {
   ref as storageRef,
   uploadBytes,
   deleteObject,
+  getDownloadURL,
 } from "firebase/storage";
+import type { ShoeClubCaptain } from "@/lib/parsers/shoeClubsParser";
 import {
   parseShoeClubs,
   detectCaptainCredits,
@@ -60,6 +62,7 @@ interface SuccessData {
   completedCount: number;
   newClubCount: number;
   comparedToPrevious: boolean;
+  comparedToLabel: string;
   credits: CaptainCredit[];
 }
 
@@ -234,7 +237,6 @@ export default function ShoeClubsImportPage() {
   const { user } = useAuth();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previousFile, setPreviousFile] = useState<File | null>(null);
 
   const [importState, setImportState] = useState<ImportState>("idle");
   const [successData, setSuccessData] = useState<SuccessData | null>(null);
@@ -297,7 +299,6 @@ export default function ShoeClubsImportPage() {
   const reset = () => {
     setImportState("idle");
     setSelectedFile(null);
-    setPreviousFile(null);
     setSuccessData(null);
     setErrorMessage("");
   };
@@ -321,31 +322,46 @@ export default function ShoeClubsImportPage() {
         );
       }
 
-      // Optional previous report → flag captains owed a captain's credit.
+      // Existing reports, newest first. The newest becomes this import's
+      // comparison baseline; everything older than it is retired below so we
+      // keep a rolling window of just the two newest reports.
+      const existingSnap = await getDocs(
+        query(
+          collection(db, "reports"),
+          where("module", "==", "shoe-clubs"),
+          orderBy("uploadedAt", "desc")
+        )
+      );
+      const existing = existingSnap.docs;
+      const baseline = existing[0] ?? null;
+
+      // Compare against the previously-newest report to flag captain credits.
       let credits: CaptainCredit[] = [];
-      const comparedToPrevious = Boolean(previousFile);
-      if (previousFile) {
-        const prevContent = await previousFile.text();
-        const prevResult = parseShoeClubs(prevContent);
-        if (prevResult.captains.length === 0) {
+      let comparedToLabel = "";
+      const comparedToPrevious = Boolean(baseline);
+      if (baseline) {
+        const bd = baseline.data();
+        comparedToLabel = `${bd.filename ?? "previous report"}${
+          bd.importDate ? ` · ${formatDate(bd.importDate)}` : ""
+        }`;
+        try {
+          const url = await getDownloadURL(
+            storageRef(storage, bd.storagePath)
+          );
+          const res = await fetch(
+            `/api/storage-proxy?url=${encodeURIComponent(url)}`
+          );
+          if (!res.ok) throw new Error("download failed");
+          const prevCaptains = (await res.json()) as ShoeClubCaptain[];
+          credits = detectCaptainCredits(prevCaptains, captains);
+        } catch {
           throw new Error(
-            "No captains found in the previous report. Make sure it is a RICS Captains List CSV export."
+            "Couldn't load the previous report to compare against. Try again."
           );
         }
-        credits = detectCaptainCredits(prevResult.captains, captains);
       }
 
       setImportState("uploading");
-
-      // Replace previous import if one exists
-      if (currentImport) {
-        try {
-          await deleteObject(storageRef(storage, currentImport.storagePath));
-        } catch {
-          // File may not exist in Storage
-        }
-        await deleteDoc(doc(db, "reports", currentImport.id));
-      }
 
       // Upload captains JSON to Firebase Storage
       const storagePath = `reports/${reportId}/shoe-clubs.json`;
@@ -354,7 +370,7 @@ export default function ShoeClubsImportPage() {
       });
       await uploadBytes(storageRef(storage, storagePath), jsonBlob);
 
-      // Write Firestore metadata
+      // Write Firestore metadata for the new (now-newest) report.
       await setDoc(docRef, {
         module: "shoe-clubs",
         filename: selectedFile.name,
@@ -367,11 +383,32 @@ export default function ShoeClubsImportPage() {
         completedCount: counts.completed,
         newClubCount: counts.newClub,
         comparedToPrevious,
+        comparedToFilename: baseline ? baseline.data().filename ?? "" : "",
+        comparedToDate: baseline ? baseline.data().importDate ?? "" : "",
         creditsCount: credits.length,
         captainCredits: credits,
         issuedCreditAccounts: [],
         storagePath,
       });
+
+      // Retire everything older than the baseline — keep only the new report
+      // and the baseline (the two newest).
+      for (let i = 1; i < existing.length; i++) {
+        const old = existing[i];
+        const sp = old.data().storagePath as string | undefined;
+        if (sp) {
+          try {
+            await deleteObject(storageRef(storage, sp));
+          } catch {
+            // may not exist
+          }
+        }
+        try {
+          await deleteDoc(doc(db, "reports", old.id));
+        } catch {
+          // best effort
+        }
+      }
 
       setSuccessData({
         filename: selectedFile.name,
@@ -381,6 +418,7 @@ export default function ShoeClubsImportPage() {
         completedCount: counts.completed,
         newClubCount: counts.newClub,
         comparedToPrevious,
+        comparedToLabel,
         credits,
       });
       setImportState("success");
@@ -429,34 +467,35 @@ export default function ShoeClubsImportPage() {
         Import — Shoe Clubs
       </h1>
       <p className="text-brand-text/50 font-body text-sm mb-6">
-        Upload the newest RICS Captains List (.csv). Add the previous report too
-        and we&apos;ll flag captains owed a captain&apos;s credit.
+        Upload the newest RICS Captains List (.csv). It&apos;s compared
+        automatically against your last import to flag captain credits
+        {currentImport ? (
+          <>
+            {" "}
+            — currently{" "}
+            <strong>{currentImport.filename}</strong> (
+            {formatDate(currentImport.importDate)})
+          </>
+        ) : (
+          <>
+            {" "}
+            — the first import just sets the baseline (nothing to compare yet)
+          </>
+        )}
+        .
       </p>
 
-      {/* IDLE — upload zones */}
+      {/* IDLE — upload zone */}
       {importState === "idle" && (
         <div className="bg-white border-l-[3px] border-brand-green rounded p-6 mb-6">
-          <div className="grid md:grid-cols-2 gap-4">
-            <DropZone
-              label="Current report (newest)"
-              hint="Required — this is the one that gets saved."
-              file={selectedFile}
-              onFile={setSelectedFile}
-            />
-            <DropZone
-              label="Previous report"
-              hint="Optional — compared to the current one to flag captain credits."
-              file={previousFile}
-              onFile={setPreviousFile}
-            />
-          </div>
+          <DropZone
+            label="New captains list"
+            hint="Compared to your last import; older reports are retired automatically."
+            file={selectedFile}
+            onFile={setSelectedFile}
+          />
 
           <div className="flex items-center justify-end gap-3 mt-4">
-            {selectedFile && !previousFile && (
-              <span className="font-body text-xs text-brand-text/40">
-                Add a previous report to check for captain credits.
-              </span>
-            )}
             <button
               onClick={handleImport}
               disabled={!selectedFile}
@@ -522,6 +561,14 @@ export default function ShoeClubsImportPage() {
             <SummaryRow
               label="New Clubs"
               value={String(successData.newClubCount)}
+            />
+            <SummaryRow
+              label="Compared Against"
+              value={
+                successData.comparedToPrevious
+                  ? successData.comparedToLabel
+                  : "First import — baseline only"
+              }
             />
           </div>
 
