@@ -481,11 +481,25 @@ export default function ClubStatusPage() {
           Print / Save as PDF
         </button>
       </div>
-      <p className="no-print text-brand-text/50 text-sm font-body mb-5">
+      <p className="no-print text-brand-text/50 text-sm font-body mb-2">
         {report.totalCaptains} captain{report.totalCaptains === 1 ? "" : "s"}{" "}
         &middot; {report.outstandingCount} outstanding &middot;{" "}
         {report.completedCount} completed &middot; {report.newClubCount} new
         &middot; as of {fmtDateLong(report.importDate)}
+      </p>
+      <p className="no-print font-body text-sm mb-5">
+        {report.comparedToPrevious && report.comparedToDate ? (
+          <span className="inline-flex items-center gap-1.5 rounded bg-amber-50 border border-amber-200 text-amber-800 px-2.5 py-1">
+            <Award className="w-3.5 h-3.5" />
+            Comparing <strong>{fmtDateLong(report.importDate)}</strong> against{" "}
+            <strong>{fmtDateLong(report.comparedToDate)}</strong> for captain
+            credits
+          </span>
+        ) : (
+          <span className="text-brand-text/40">
+            First import — no previous report to compare against yet.
+          </span>
+        )}
       </p>
 
       {/* ─── Summary tiles (screen) ─── */}
